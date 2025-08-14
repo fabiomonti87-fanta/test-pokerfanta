@@ -489,6 +489,23 @@ const FantacalcioManager: React.FC = () => {
         </div>
       </div>
     );
+        
+        // stato
+const [matches, setMatches] = useState<
+  { utcDate: string; homeTeam: { name: string }; awayTeam: { name: string } }[]
+>([]);
+
+// fetch al mount
+useEffect(() => {
+  const d = new Date();
+  const df = d.toISOString().slice(0,10);
+  const d2 = new Date(d.getTime() + 7*86400000).toISOString().slice(0,10);
+
+  fetch(`/api/sa-matches?status=SCHEDULED&dateFrom=${df}&dateTo=${d2}`)
+    .then(r => r.json())
+    .then(j => setMatches(Array.isArray(j?.matches) ? j.matches.slice(0,10) : []))
+    .catch(() => setMatches([]));
+}, []);
   }
 
   // ===== DETTAGLIO =====
