@@ -1,9 +1,8 @@
-// src/app/api/sa-matches/route.ts
 import { NextResponse } from 'next/server';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const status = searchParams.get('status') ?? 'SCHEDULED';
+  const status   = searchParams.get('status')   ?? 'SCHEDULED';
   const dateFrom = searchParams.get('dateFrom') ?? '';
   const dateTo   = searchParams.get('dateTo')   ?? '';
   const url = new URL('https://api.football-data.org/v4/competitions/SA/matches');
@@ -13,10 +12,11 @@ export async function GET(req: Request) {
 
   const resp = await fetch(url.toString(), {
     headers: { 'X-Auth-Token': process.env.FOOTBALL_DATA_TOKEN ?? '' },
-    next: { revalidate: 60 } // cache 60s
+    next: { revalidate: 60 } // caching 60s lato server
   });
 
   if (!resp.ok) {
+    // inoltra il codice d'errore dell'upstream (utile per debug: 401/403/429…)
     return NextResponse.json({ error: 'Upstream error' }, { status: resp.status });
   }
   const data = await resp.json();
