@@ -1,5 +1,4 @@
-'use client';
-
+// src/components/FantacalcioManager.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
@@ -12,38 +11,14 @@ import {
   getFVM as getFvmHook, parseRoles
 } from '../hooks/useBestLineup';
 
-// Per compatibilità con window.fs opzionale
+// Per compatibilita con window.fs opzionale
 declare global {
   interface Window {
     fs?: { readFile: (name: string) => Promise<ArrayBuffer> }
   }
 }
 
-// ---------------- Tipi/costanti locali ----------------
-type FilterType = 'tutti'|'scadenza'|'organico'|'riconferme'|'nonInListone'|'vivaio';
-
 const FORMATION_KEYS: FormationKey[] = ['4-3-3','4-4-2','3-5-2','3-4-3','4-2-3-1'];
-
-// Tipi di acquisto validi (fuori dal componente -> niente warning deps)
-const TIPI_ACQUISTO_DEFAULT: ReadonlyArray<string> = [
-  'Acquistato tit definitivo', 'Asta', 'Asta riparazione',
-  'Ceduto in prestito', 'Vivaio', 'Promosso da vivaio'
-];
-
-// filtro UI tipizzato (per evitare `as any`)
-const FILTERS: ReadonlyArray<{ key: FilterType; label: React.ReactNode; cls: string }> = [
-  { key: 'tutti',         label: 'Tutti',        cls: 'bg-green-600' },
-  { key: 'scadenza',      label: 'In Scadenza',  cls: 'bg-red-600' },
-  { key: 'organico',      label: 'In Organico',  cls: 'bg-blue-600' },
-  { key: 'riconferme',    label: 'Riconferme',   cls: 'bg-purple-600' },
-  { key: 'nonInListone',  label: 'Non in Lista', cls: 'bg-orange-600' },
-  { key: 'vivaio',        label: (<><Baby className="h-4 w-4 inline mr-1" />Vivaio</>), cls: 'bg-emerald-600' },
-];
-
-// tipizzazione celle Excel
-type Cell = string | number | Date | boolean | null | undefined;
-
-// ------------------------------------------------------
 
 const FantacalcioManager: React.FC = () => {
   const [allData, setAllData] = useState<Player[]>([]);
@@ -51,7 +26,7 @@ const FantacalcioManager: React.FC = () => {
   const [squadre, setSquadre] = useState<string[]>([]);
   const [creditiSquadre, setCreditiSquadre] = useState<Record<string, number>>({});
   const [selectedSquadra, setSelectedSquadra] = useState<string>('');
-  const [filterType, setFilterType] = useState<FilterType>('tutti');
+  const [filterType, setFilterType] = useState<'tutti'|'scadenza'|'organico'|'riconferme'|'nonInListone'|'vivaio'>('tutti');
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string|null>(null);
   const [fileLoaded, setFileLoaded] = useState<boolean>(false);
@@ -67,6 +42,12 @@ const FantacalcioManager: React.FC = () => {
   // Formazione + Campo (hidden by default)
   const [formationChoice, setFormationChoice] = useState<'auto'|FormationKey>('auto');
   const [showPitch, setShowPitch] = useState<boolean>(false);
+
+  // Tipi di acquisto validi
+  const tipiAcquistoDefault = [
+    'Acquistato tit definitivo', 'Asta', 'Asta riparazione',
+    'Ceduto in prestito', 'Vivaio', 'Promosso da vivaio'
+  ];
 
   useEffect(() => {
     // Autoload da window.fs se presente
@@ -94,14 +75,9 @@ const FantacalcioManager: React.FC = () => {
     if (!file) return;
     setLoading(true); setError(null);
     const reader = new FileReader();
-    reader.onload = (ev: ProgressEvent<FileReader>) => {
-      const res = ev.target?.result;
-      if (res instanceof ArrayBuffer) {
-        try { processExcelData(res); }
-        catch { setError('Errore nel processamento del file.'); setLoading(false); }
-      } else {
-        setError('Formato file non supportato.'); setLoading(false);
-      }
+    reader.onload = ev => {
+      try { processExcelData(ev.target?.result as ArrayBuffer); }
+      catch { setError('Errore nel processamento del file.'); setLoading(false); }
     };
     reader.onerror = () => { setError('Errore nella lettura del file.'); setLoading(false); };
     reader.readAsArrayBuffer(file);
@@ -124,10 +100,23 @@ const FantacalcioManager: React.FC = () => {
       [17,'Seconda Punta','Dinamo Splash','NAP','A','-','2024-09-01','2027-07-01','Asta','', '', 0, 0, 0, '', 40, 2.4, 1.6],
     ];
     const processed: Player[] = demo.map(row => ({
-      id: row[0], giocatore: String(row[1]), squadraFantacalcio: String(row[2]), squadraSerieA: String(row[3]),
-      ruolo: String(row[4]), tipoContratto: String(row[5]), dataAcquisto: row[6] as string, scadenzaIpotizzata: row[7] as string,
-      tipoAcquisto: String(row[8]), valAsteriscato: row[9], scambioIngaggio: row[10], valoreAcquisto: row[11],
-      fvm2425: row[12], ultimoFVM: row[13], valoreXMercato: row[15], ingaggio36: row[16], ingaggioReale: row[17]
+      id: row[0] as number, 
+      giocatore: row[1] as string, 
+      squadraFantacalcio: row[2] as string, 
+      squadraSerieA: row[3] as string,
+      ruolo: row[4] as string, 
+      tipoContratto: row[5] as string, 
+      dataAcquisto: row[6] as string, 
+      scadenzaIpotizzata: row[7] as string,
+      tipoAcquisto: row[8] as string, 
+      valAsteriscato: row[9] as string, 
+      scambioIngaggio: row[10] as string, 
+      valoreAcquisto: row[11] as number,
+      fvm2425: row[12] as number, 
+      ultimoFVM: row[13] as number, 
+      valoreXMercato: row[15] as number, 
+      ingaggio36: row[16] as number, 
+      ingaggioReale: row[17] as number
     }));
     setAllData(processed);
     const uniq = [...new Set(processed.map(p => p.squadraFantacalcio))].sort();
@@ -140,32 +129,30 @@ const FantacalcioManager: React.FC = () => {
   const processExcelData = (data: ArrayBuffer) => {
     try {
       const wb = XLSX.read(data, { type: 'array', cellStyles: true, cellFormulas: true, cellDates: true, cellNF: true, sheetStubs: true });
-      const gestionale = wb.Sheets['Gestionale'];
-      if (!gestionale) { setError('Il file non contiene il foglio "Gestionale".'); setLoading(false); return; }
-
-      const raw = XLSX.utils.sheet_to_json<Cell[]>(gestionale, { header: 1 });
+      if (!wb.Sheets['Gestionale']) { setError('Il file non contiene il foglio "Gestionale".'); setLoading(false); return; }
+      const raw: unknown[][] = XLSX.utils.sheet_to_json(wb.Sheets['Gestionale'], { header: 1 }) as unknown[][];
       const rows: Player[] = [];
       for (let i = 1; i < raw.length; i++) {
-        const r = raw[i];
+        const r = raw[i] as unknown[];
         if (r && r[1] && r[1] !== '#N/A') {
           rows.push({
-            id: r[0] as number | string,
-            giocatore: String(r[1]),
-            squadraFantacalcio: String(r[2] ?? ''),
-            squadraSerieA: String(r[3] ?? ''),
-            ruolo: String(r[4] ?? ''),
-            tipoContratto: String(r[5] ?? ''),
-            dataAcquisto: r[6] as string | Date | undefined,
-            scadenzaIpotizzata: r[7] as string | Date | undefined,
-            tipoAcquisto: String(r[8] ?? ''),
-            valAsteriscato: r[9] as number | string | undefined,
-            scambioIngaggio: r[10] as number | string | undefined,
-            valoreAcquisto: r[11] as number | string | undefined,
-            fvm2425: r[12] as number | string | undefined,
-            ultimoFVM: r[13] as number | string | undefined,
-            valoreXMercato: r[15] as number | string | undefined,
-            ingaggio36: r[16] as number | string | undefined,
-            ingaggioReale: r[17] as number | string | undefined,
+            id: r[0] as number, 
+            giocatore: r[1] as string, 
+            squadraFantacalcio: r[2] as string, 
+            squadraSerieA: r[3] as string, 
+            ruolo: r[4] as string,
+            tipoContratto: r[5] as string, 
+            dataAcquisto: r[6] as string, 
+            scadenzaIpotizzata: r[7] as string, 
+            tipoAcquisto: r[8] as string,
+            valAsteriscato: r[9] as string, 
+            scambioIngaggio: r[10] as string, 
+            valoreAcquisto: r[11] as number, 
+            fvm2425: r[12] as number,
+            ultimoFVM: r[13] as number, 
+            valoreXMercato: r[15] as number, 
+            ingaggio36: r[16] as number, 
+            ingaggioReale: r[17] as number
           });
         }
       }
@@ -175,15 +162,12 @@ const FantacalcioManager: React.FC = () => {
       const uniq = [...new Set(rows.map(p => p.squadraFantacalcio).filter(s => s && s !== '#N/A'))].sort() as string[];
       setSquadre(uniq);
 
-      const sintesiSheet = wb.Sheets['Sintesi Squadre'];
-      if (sintesiSheet) {
-        const sintesi = XLSX.utils.sheet_to_json<Cell[]>(sintesiSheet, { header: 1 });
+      if (wb.Sheets['Sintesi Squadre']) {
+        const sintesi: unknown[][] = XLSX.utils.sheet_to_json(wb.Sheets['Sintesi Squadre'], { header: 1 }) as unknown[][];
         const cred: Record<string, number> = {};
         for (let i = 18; i < sintesi.length; i++) {
-          const r = sintesi[i];
-          const nome = r?.[0];
-          const valore = r?.[1];
-          if (nome) cred[String(nome)] = parseFloat(String(valore)) || 0;
+          const r = sintesi[i] as unknown[];
+          if (r && r[0]) cred[r[0] as string] = parseFloat(r[1] as string) || 0;
         }
         setCreditiSquadre(cred);
       }
@@ -210,7 +194,7 @@ const FantacalcioManager: React.FC = () => {
   // Calcoli riepilogo
   const calculateValoreInScadenza = (squadra: string) => allData
     .filter(p => p.squadraFantacalcio === squadra
-      && TIPI_ACQUISTO_DEFAULT.includes(String(p.tipoAcquisto))
+      && tipiAcquistoDefault.includes(String(p.tipoAcquisto))
       && p.scadenzaIpotizzata && p.scadenzaIpotizzata !== '#N/A'
       && new Date(p.scadenzaIpotizzata).getDate() === 1
       && new Date(p.scadenzaIpotizzata).getMonth() === 6
@@ -221,13 +205,13 @@ const FantacalcioManager: React.FC = () => {
     (creditiSquadre[squadra] || 0) + calculateValoreInScadenza(squadra);
 
   const calculateTotaleIngaggi = (squadra: string) => allData
-    .filter(p => p.squadraFantacalcio === squadra && TIPI_ACQUISTO_DEFAULT.includes(String(p.tipoAcquisto)))
+    .filter(p => p.squadraFantacalcio === squadra && tipiAcquistoDefault.includes(String(p.tipoAcquisto)))
     .reduce((s, p) => s + (parseFloat(String(p.ingaggioReale)) || 0), 0);
 
   const calculateContrattiPluriennali = (squadra: string) => allData
     .filter(p => {
       if (p.squadraFantacalcio !== squadra) return false;
-      const organico = TIPI_ACQUISTO_DEFAULT.filter(t => t !== 'Vivaio');
+      const organico = tipiAcquistoDefault.filter(t => t !== 'Vivaio');
       if (!organico.includes(String(p.tipoAcquisto))) return false;
       if (!p.scadenzaIpotizzata || p.scadenzaIpotizzata === '#N/A') return false;
       const scad = new Date(p.scadenzaIpotizzata);
@@ -245,7 +229,7 @@ const FantacalcioManager: React.FC = () => {
 
       if (filterType === 'vivaio' && !(p.tipoAcquisto === 'Vivaio' || p.tipoAcquisto === 'Promosso da vivaio')) return false;
 
-      const tipi = filterType === 'organico' ? TIPI_ACQUISTO_DEFAULT.filter(t => t !== 'Vivaio') : TIPI_ACQUISTO_DEFAULT;
+      const tipi = filterType === 'organico' ? tipiAcquistoDefault.filter(t => t !== 'Vivaio') : tipiAcquistoDefault;
       if (!tipi.includes(String(p.tipoAcquisto))) return false;
 
       if (filterType === 'nonInListone') {
@@ -282,7 +266,7 @@ const FantacalcioManager: React.FC = () => {
       return true;
     });
     setFilteredData(res);
-  }, [selectedSquadra, filterType, allData, normalizedQuery, selectedRoles]);
+  }, [selectedSquadra, filterType, allData, normalizedQuery, selectedRoles, tipiAcquistoDefault]);
 
   const toggleRole = (r: string) => setSelectedRoles(prev => {
     const n = new Set(prev); n.has(r) ? n.delete(r) : n.add(r); return n;
@@ -301,14 +285,14 @@ const FantacalcioManager: React.FC = () => {
     return allData
       .filter(p => p.squadraFantacalcio === selectedSquadra)
       .filter(p => {
-        const organicoTypes = TIPI_ACQUISTO_DEFAULT.filter(t => t !== 'Vivaio');
+        const organicoTypes = tipiAcquistoDefault.filter(t => t !== 'Vivaio');
         if (!organicoTypes.includes(String(p.tipoAcquisto))) return false;
         if (!p.scadenzaIpotizzata || p.scadenzaIpotizzata === '#N/A') return false;
         const scad = new Date(p.scadenzaIpotizzata);
         if (!(scad > new Date('2025-07-01'))) return false;
         return getFvmHook(p) > 0;
       });
-  }, [allData, selectedSquadra]);
+  }, [allData, selectedSquadra, tipiAcquistoDefault]);
 
   const bestLineup = useBestLineup(organicoPlayers, formationChoice);
 
@@ -393,7 +377,7 @@ const FantacalcioManager: React.FC = () => {
                 <input
                   value={homeQuery}
                   onChange={e => setHomeQuery(e.target.value)}
-                  placeholder="Cerca squadra…"
+                  placeholder="Cerca squadra..."
                   className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                 />
                 {homeQuery && (
@@ -563,10 +547,17 @@ const FantacalcioManager: React.FC = () => {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Filtro Giocatori</label>
               <div className="grid grid-cols-3 gap-2">
-                {FILTERS.map(({ key, label, cls }) => (
+                {[
+                  { key: 'tutti', label: 'Tutti', cls: 'bg-green-600' },
+                  { key: 'scadenza', label: 'In Scadenza', cls: 'bg-red-600' },
+                  { key: 'organico', label: 'In Organico', cls: 'bg-blue-600' },
+                  { key: 'riconferme', label: 'Riconferme', cls: 'bg-purple-600' },
+                  { key: 'nonInListone', label: 'Non in Lista', cls: 'bg-orange-600' },
+                  { key: 'vivaio', label: <><Baby className="h-4 w-4 inline mr-1" />Vivaio</>, cls: 'bg-emerald-600' },
+                ].map(({ key, label, cls }) => (
                   <button
                     key={key}
-                    onClick={() => setFilterType(key)}
+                    onClick={() => setFilterType(key as typeof filterType)}
                     className={`px-3 py-2 rounded-lg font-medium text-sm transition-colors ${filterType === key ? `${cls} text-white` : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                   >
                     {label}
@@ -586,7 +577,7 @@ const FantacalcioManager: React.FC = () => {
                 <input
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
-                  placeholder={`Cerca nella rosa di ${selectedSquadra || 'squadra'}…`}
+                  placeholder={`Cerca nella rosa di ${selectedSquadra || 'squadra'}...`}
                   className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                 />
                 {searchQuery && (
@@ -599,7 +590,7 @@ const FantacalcioManager: React.FC = () => {
                   </button>
                 )}
               </div>
-              <p className="mt-1 text-xs text-gray-500">La ricerca è limitata alla squadra selezionata.</p>
+              <p className="mt-1 text-xs text-gray-500">La ricerca e limitata alla squadra selezionata.</p>
             </div>
 
             {/* Toggle Ruoli (OR) */}
@@ -642,7 +633,7 @@ const FantacalcioManager: React.FC = () => {
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
             >
               <Eye className="h-4 w-4" />
-              {showPitch ? 'Nascondi campo' : 'Oggi giocherebbero così'}
+              {showPitch ? 'Nascondi campo' : 'Oggi giocherebbero cosi'}
             </button>
           </div>
         </div>
@@ -652,14 +643,14 @@ const FantacalcioManager: React.FC = () => {
           <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
             <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
               <div>
-                <h3 className="text-xl font-semibold text-gray-900">Oggi giocherebbero così</h3>
-                <p className="text-sm text-gray-500">Scelta basata sull’organico (scadenza &gt; 01/07/2025) e FVM più alto, nel rispetto dei ruoli Mantra.</p>
+                <h3 className="text-xl font-semibold text-gray-900">Oggi giocherebbero cosi</h3>
+                <p className="text-sm text-gray-500">Scelta basata sull&apos;organico (scadenza &gt; 01/07/2025) e FVM piu alto, nel rispetto dei ruoli Mantra.</p>
               </div>
               <div className="w-full md:w-64">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Formazione</label>
                 <select
                   value={formationChoice}
-                  onChange={(e) => setFormationChoice(e.target.value as 'auto' | FormationKey)}
+                  onChange={(e) => setFormationChoice(e.target.value as typeof formationChoice)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
                 >
                   <option value="auto">Selezione automatica (migliore)</option>
@@ -692,7 +683,7 @@ const FantacalcioManager: React.FC = () => {
                     const p = a.player;
                     const left = `${a.slot.x}%`;
                     const top = `${a.slot.y}%`;
-                    const label = p ? (p.giocatore.length > 14 ? p.giocatore.slice(0, 13) + '…' : p.giocatore) : '—';
+                    const label = p ? (p.giocatore.length > 14 ? p.giocatore.slice(0, 13) + '...' : p.giocatore) : '—';
                     const initials = p
                       ? (p.giocatore.split(' ')[0]?.[0] || '') + (p.giocatore.split(' ')[1]?.[0] || '')
                       : '-';
@@ -729,7 +720,7 @@ const FantacalcioManager: React.FC = () => {
                   )}
                 </>
               ) : (
-                <span className="text-gray-600">Nessun giocatore in organico disponibile per calcolare l’XI.</span>
+                <span className="text-gray-600">Nessun giocatore in organico disponibile per calcolare l&apos;XI.</span>
               )}
             </div>
 
