@@ -659,49 +659,58 @@ const FantacalcioManager: React.FC = () => {
               </div>
             </div>
 
-            {/* Campo stilizzato */}
-            <div className="mt-4 overflow-x-auto">
-              <div className="min-w-[640px]">
-                <div
-                  className="relative w-full rounded-xl border"
-                  style={{
-                    paddingTop: '62%',
-                    backgroundImage:
-                      'repeating-linear-gradient(90deg, rgba(16,122,57,0.95) 0, rgba(16,122,57,0.95) 6%, rgba(13,102,48,0.95) 6%, rgba(13,102,48,0.95) 12%)',
-                    backgroundColor: '#0d6630',
-                    boxShadow: 'inset 0 0 0 3px #fff, inset 0 0 0 6px rgba(255,255,255,0.4)'
-                  }}
-                >
-                  {/* linee principali */}
-                  <div className="absolute left-1/2 top-0 -translate-x-1/2 w-px h-full bg-white/70" />
-                  <div className="absolute left-1/2 top-[31%] -translate-x-1/2 w-[18%] h-[32%] rounded-full border border-white/70" />
-                  <div className="absolute left-[20%] bottom-0 w-[60%] h-[22%] border-t border-white/70" />
-                  <div className="absolute left-[20%] top-0 w-[60%] h-[22%] border-b border-white/70" />
+           {/* Campo stilizzato (SVG) */}
+<div className="mt-4 overflow-x-auto">
+  <div className="min-w-[700px]">
+    <div className="relative w-full rounded-xl border bg-emerald-900/10" style={{paddingTop:'60%'}}>
+      {/* SVG field */}
+      <svg viewBox="0 0 105 68" className="absolute inset-0 w-full h-full">
+        <defs>
+          {/* bande orizzontali */}
+          <pattern id="grass" width="4" height="4" patternUnits="userSpaceOnUse">
+            <rect width="4" height="4" fill="#127a39"/>
+            <rect width="4" height="2" fill="#0f6a32"/>
+          </pattern>
+        </defs>
+        <rect x="1.5" y="1.5" width="102" height="65" rx="2" fill="url(#grass)" stroke="#ffffff" strokeWidth="1.5"/>
+        {/* linea metà campo */}
+        <line x1="52.5" y1="1.5" x2="52.5" y2="66.5" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
+        {/* cerchio di centrocampo */}
+        <circle cx="52.5" cy="34" r="9" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
+        {/* aree di rigore */}
+        {/* alto */}
+        <rect x="24" y="1.5" width="57" height="12" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
+        <rect x="34.5" y="1.5" width="36" height="4.5" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
+        {/* basso */}
+        <rect x="24" y="54.5" width="57" height="12" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
+        <rect x="34.5" y="62" width="36" height="4.5" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
+        {/* dischetti */}
+        <circle cx="52.5" cy="11" r="0.8" fill="#fff"/>
+        <circle cx="52.5" cy="57" r="0.8" fill="#fff"/>
+      </svg>
 
-                  {/* giocatori */}
-                  {bestLineup && bestLineup.assigned.map((a, i) => {
-                    const p = a.player;
-                    const left = `${a.slot.x}%`;
-                    const top = `${a.slot.y}%`;
-                    const label = p ? (p.giocatore.length > 14 ? p.giocatore.slice(0, 13) + '...' : p.giocatore) : '—';
-                    const initials = p
-                      ? (p.giocatore.split(' ')[0]?.[0] || '') + (p.giocatore.split(' ')[1]?.[0] || '')
-                      : '-';
-                    return (
-                      <div key={`pos-${i}`} style={{ left, top, transform: 'translate(-50%, -50%)' }} className="absolute text-center">
-                        <div className={`mx-auto h-10 w-10 rounded-full flex items-center justify-center border ${p ? 'bg-white/95 text-gray-900' : 'bg-white/30 text-white'} shadow`}>
-                          <span className="text-[11px] font-semibold">{initials.toUpperCase()}</span>
-                        </div>
-                        <div className="mt-1 text-[11px] font-medium text-white drop-shadow">{label}</div>
-                        <div className="text-[10px] text-white/80">
-                          {p ? `${a.chosenRole} • FVM ${p._fvm.toFixed(0)}` : a.slot.label}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+      {/* giocatori posizionati */}
+      {bestLineup && bestLineup.assigned.map((a,i)=>{
+        const p = a.player;
+        const left = `${a.slot.x}%`;
+        const top  = `${a.slot.y}%`;
+        const label = p ? (p.giocatore.length>14 ? p.giocatore.slice(0,13)+'…' : p.giocatore) : '—';
+        const initials = p ? (p.giocatore.split(' ')[0]?.[0]||'') + (p.giocatore.split(' ')[1]?.[0]||'') : '-';
+        return (
+          <div key={`pos-${i}`} style={{left, top, transform:'translate(-50%,-50%)'}}
+               className="absolute text-center">
+            <div className={`mx-auto h-10 w-10 rounded-full flex items-center justify-center border shadow
+                             ${p ? 'bg-white text-gray-900' : 'bg-white/30 text-white'}`}>
+              <span className="text-[11px] font-semibold">{initials.toUpperCase()}</span>
             </div>
+            <div className="mt-1 text-[11px] font-medium text-white drop-shadow">{label}</div>
+            <div className="text-[10px] text-white/90">{p ? `${a.chosenRole} • FVM ${p._fvm.toFixed(0)}` : a.slot.label}</div>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+</div>
 
             {/* riepilogo XI */}
             <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-gray-700">
