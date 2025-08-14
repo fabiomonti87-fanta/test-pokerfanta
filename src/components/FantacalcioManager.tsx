@@ -47,6 +47,12 @@ const FantacalcioManager: React.FC = () => {
   const tipiAcquistoDefault = [
     'Acquistato tit definitivo', 'Asta', 'Asta riparazione',
     'Ceduto in prestito', 'Vivaio', 'Promosso da vivaio'
+
+    // subito dopo altri useState
+const [matches, setMatches] = useState<
+  { utcDate: string; homeTeam: { name: string }; awayTeam: { name: string } }[]
+>([]);
+
   ];
 
   useEffect(() => {
@@ -496,6 +502,18 @@ const [matches, setMatches] = useState<
 >([]);
 
 // fetch al mount
+useEffect(() => {
+  if (currentView !== 'riepilogo') return; // solo quando sei in Home
+  const d = new Date();
+  const df = d.toISOString().slice(0, 10);
+  const d2 = new Date(d.getTime() + 7 * 86400000).toISOString().slice(0, 10);
+
+  fetch(`/api/sa-matches?status=SCHEDULED&dateFrom=${df}&dateTo=${d2}`)
+    .then(r => r.json())
+    .then(j => setMatches(Array.isArray(j?.matches) ? j.matches.slice(0, 10) : []))
+    .catch(() => setMatches([]));
+}, [currentView]);
+
 useEffect(() => {
   const d = new Date();
   const df = d.toISOString().slice(0,10);
