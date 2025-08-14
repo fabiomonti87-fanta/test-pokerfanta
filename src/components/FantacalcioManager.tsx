@@ -886,5 +886,4 @@ const FantacalcioManager: React.FC = () => {
     </div>
   );
 };
-
 export default FantacalcioManager;
