@@ -426,6 +426,49 @@ const [matches, setMatches] = useState<
 
 
           <div className="bg-white rounded-xl shadow-lg overflow-hidden relative">
+// ===== HOME =====
+if (currentView === 'riepilogo') {
+  return (
+    <div className="min-h-screen ...">
+      <div className="max-w-5xl mx-auto">
+
+        {/* [A] HEADER (dove hai aggiunto Select + "Vai al dettaglio") */}
+        <div className="bg-white rounded-xl shadow-lg p-4 md:p-6 mb-4"> ... </div>
+
+        {/* [B] TABELLA + LEGENDA */}
+        <div className="bg-white rounded-xl shadow-lg overflow-hidden relative">
+          {/* ...tutta la tabella + legenda... */}
+        </div>
+
+        {/* [C] ➜ QUI INCOLLA IL WIDGET PARTITE */}
+        <div className="mt-6 bg-white rounded-xl shadow p-4">
+          <h3 className="text-lg font-semibold text-gray-800 mb-3">
+            Prossime partite Serie A (7 giorni)
+          </h3>
+          {matches.length === 0 ? (
+            <p className="text-sm text-gray-500">Nessuna partita trovata.</p>
+          ) : (
+            <ul className="text-sm text-gray-800 grid md:grid-cols-2 gap-2">
+              {matches.map((m, i) => {
+                const dt = new Date(m.utcDate);
+                return (
+                  <li key={i} className="flex items-center justify-between border rounded-lg px-3 py-2">
+                    <span className="font-medium">{m.homeTeam.name} – {m.awayTeam.name}</span>
+                    <span className="text-gray-500">
+                      {dt.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
             <div className="overflow-x-auto">
               <table className="min-w-[720px] w-full text-sm">
                 <thead className="bg-gradient-to-r from-green-600 to-green-700">
