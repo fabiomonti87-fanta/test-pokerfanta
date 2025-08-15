@@ -1029,13 +1029,12 @@ async function openPlayerStats(name: string, tla: string) {
       </div>
       {/* --- MODAL STATISTICHE GIOCATORE --- */}
 {ENABLE_STATS && playerModalOpen && (
-  /* ...modal... */ 
   <div
     className="fixed inset-0 z-50 flex items-center justify-center"
     role="dialog"
     aria-modal="true"
     aria-labelledby="player-stats-title"
-    onKeyDown={(e) => e.key === 'Escape' && setPlayerModalOpen(false)}
+    onKeyDown={(e) => { if (e.key === 'Escape') setPlayerModalOpen(false); }}
     tabIndex={-1}
   >
     {/* backdrop */}
@@ -1043,6 +1042,7 @@ async function openPlayerStats(name: string, tla: string) {
       className="absolute inset-0 bg-black/40"
       onClick={() => setPlayerModalOpen(false)}
     />
+
     {/* card */}
     <div className="relative z-10 w-[92vw] max-w-2xl bg-white rounded-xl shadow-2xl border">
       <div className="px-5 py-4 border-b flex items-center justify-between">
@@ -1050,6 +1050,7 @@ async function openPlayerStats(name: string, tla: string) {
           {playerStats?.player?.name ? `Statistiche • ${playerStats.player.name}` : 'Statistiche giocatore'}
         </h3>
         <button
+          type="button"
           className="rounded-md px-2 py-1 text-gray-600 hover:bg-gray-100"
           onClick={() => setPlayerModalOpen(false)}
         >
@@ -1061,15 +1062,9 @@ async function openPlayerStats(name: string, tla: string) {
         {playerLoading && (
           <div className="flex items-center gap-2 text-gray-600">
             <div className="h-5 w-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
-            Caricamento…
+            <span>Caricamento…</span>
           </div>
         )}
-        {/* ...resto del contenuto... */}
-      </div>
-    </div>
-  </div>
-)}
-
 
         {!playerLoading && playerError && (
           <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">
@@ -1087,46 +1082,44 @@ async function openPlayerStats(name: string, tla: string) {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="text-xs text-gray-500">Presenze</div>
-                <div className="text-xl font-bold">{playerStats.aggregations.matchesOnPitch ?? 0}</div>
+                <div className="text-xl font-bold">{playerStats.aggregations?.matchesOnPitch ?? 0}</div>
               </div>
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="text-xs text-gray-500">Titolare</div>
-                <div className="text-xl font-bold">{playerStats.aggregations.startingXI ?? 0}</div>
+                <div className="text-xl font-bold">{playerStats.aggregations?.startingXI ?? 0}</div>
               </div>
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="text-xs text-gray-500">Minuti</div>
-                <div className="text-xl font-bold">{playerStats.aggregations.minutesPlayed ?? 0}</div>
+                <div className="text-xl font-bold">{playerStats.aggregations?.minutesPlayed ?? 0}</div>
               </div>
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="text-xs text-gray-500">Gol</div>
-                <div className="text-xl font-bold">{playerStats.aggregations.goals ?? 0}</div>
+                <div className="text-xl font-bold">{playerStats.aggregations?.goals ?? 0}</div>
               </div>
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="text-xs text-gray-500">Assist</div>
-                <div className="text-xl font-bold">{playerStats.aggregations.assists ?? 0}</div>
+                <div className="text-xl font-bold">{playerStats.aggregations?.assists ?? 0}</div>
               </div>
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="text-xs text-gray-500">Gialli</div>
-                <div className="text-xl font-bold">{playerStats.aggregations.yellowCards ?? 0}</div>
+                <div className="text-xl font-bold">{playerStats.aggregations?.yellowCards ?? 0}</div>
               </div>
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="text-xs text-gray-500">Giallo+Rosso</div>
-                <div className="text-xl font-bold">{playerStats.aggregations.yellowRedCards ?? 0}</div>
+                <div className="text-xl font-bold">{playerStats.aggregations?.yellowRedCards ?? 0}</div>
               </div>
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="text-xs text-gray-500">Rossi</div>
-                <div className="text-xl font-bold">{playerStats.aggregations.redCards ?? 0}</div>
+                <div className="text-xl font-bold">{playerStats.aggregations?.redCards ?? 0}</div>
               </div>
             </div>
 
             {/* Ultime partite */}
             <div>
               <div className="text-sm font-semibold text-gray-800 mb-2">Ultime partite</div>
-              {playerStats.recentMatches.length === 0 ? (
-                <div className="text-sm text-gray-500">Nessun match in range.</div>
-              ) : (
+              {playerStats.recentMatches?.length ? (
                 <ul className="space-y-2">
-                  {playerStats.recentMatches.map((m, i) => {
+                  {playerStats.recentMatches.slice(0, 10).map((m, i) => {
                     const dt = new Date(m.utcDate);
                     const fh = m.score?.fullTime?.home;
                     const fa = m.score?.fullTime?.away;
@@ -1148,6 +1141,8 @@ async function openPlayerStats(name: string, tla: string) {
                     );
                   })}
                 </ul>
+              ) : (
+                <div className="text-sm text-gray-500">Nessun match in range.</div>
               )}
             </div>
           </>
