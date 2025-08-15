@@ -12,6 +12,8 @@ import {
   getFVM as getFvmHook, parseRoles
 } from '../hooks/useBestLineup';
 
+const ENABLE_STATS = false;
+
 // compat opzionale per window.fs (auto-load)
 declare global {
   interface Window {
@@ -929,79 +931,88 @@ async function openPlayerStats(name: string, tla: string) {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Scadenza</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {filteredData.length ? filteredData.map((p, i) => {
-                  const scad = p.scadenzaIpotizzata && p.scadenzaIpotizzata !== '#N/A' ? new Date(p.scadenzaIpotizzata) : null;
-                  const inScadenza = !!(scad && scad.getDate() === 1 && scad.getMonth() === 6 && scad.getFullYear() === 2025);
-                  let rowBg = '';
-                  if (p.tipoAcquisto === 'Vivaio') rowBg = 'bg-green-50';
-                  else if (p.tipoAcquisto === 'Promosso da vivaio') rowBg = 'bg-blue-100';
-                  else if (p.tipoContratto && (String(p.tipoContratto).toLowerCase().includes('obbligo') || String(p.tipoContratto).toLowerCase().includes('diritto'))) rowBg = 'bg-yellow-100';
-                  return (
-                    <tr key={`${p.id ?? i}-${p.giocatore}`} className={`hover:bg-gray-50 transition-colors ${rowBg}`}>
-                     <td className="px-6 py-4 whitespace-nowrap">
-  <div>
-    <button
-      type="button"
-      onClick={() => openPlayerStats(p.giocatore, String(p.squadraSerieA || '').toUpperCase())}
-      className="text-left text-sm font-semibold text-emerald-700 hover:text-emerald-900 hover:underline focus:outline-none"
-      title="Vedi statistiche 2024/25"
-    >
-      {p.giocatore}
-    </button>
-    <div className="text-xs text-gray-500">{p.squadraSerieA !== '#N/A' ? p.squadraSerieA : '-'}</div>
-  </div>
-</td>
+             <tbody className="bg-white divide-y divide-gray-200">
+  {filteredData.length ? filteredData.map((p, i) => {
+    const scad = p.scadenzaIpotizzata && p.scadenzaIpotizzata !== '#N/A' ? new Date(p.scadenzaIpotizzata) : null;
+    const inScadenza = !!(scad && scad.getDate() === 1 && scad.getMonth() === 6 && scad.getFullYear() === 2025);
+    let rowBg = '';
+    if (p.tipoAcquisto === 'Vivaio') rowBg = 'bg-green-50';
+    else if (p.tipoAcquisto === 'Promosso da vivaio') rowBg = 'bg-blue-100';
+    else if (p.tipoContratto && (String(p.tipoContratto).toLowerCase().includes('obbligo') || String(p.tipoContratto).toLowerCase().includes('diritto'))) rowBg = 'bg-yellow-100';
 
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                          {formatRuolo(p.ruolo)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{p.tipoContratto || '-'}</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm font-semibold text-gray-900">{formatFVM(p.valoreXMercato)}</span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-xs">
-                          <div className="text-gray-700">
-                            <span className="font-medium">Competenza:</span>{' '}
-                            <span className="text-orange-600 font-semibold">{formatIngaggio(p.ingaggioReale)}</span>
-                          </div>
-                          <div className="text-gray-600">
-                            <span className="font-medium">Giocatore:</span>{' '}
-                            <span className="text-gray-800">{formatIngaggio(p.ingaggio36)}</span>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${inScadenza ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
-                          {formatDate(p.scadenzaIpotizzata)}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                }) : (
-                  <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-500">Nessun giocatore trovato con i filtri selezionati</td></tr>
-                )}
+    return (
+      <tr key={`${p.id ?? i}-${p.giocatore}`} className={`hover:bg-gray-50 transition-colors ${rowBg}`}>
+        {/* NOME GIOCATORE: clic disattivato se ENABLE_STATS=false */}
+        <td className="px-6 py-4 whitespace-nowrap">
+          <div>
+            {ENABLE_STATS ? (
+              <button
+                type="button"
+                onClick={() => openPlayerStats(p.giocatore, String(p.squadraSerieA || '').toUpperCase())}
+                className="text-left text-sm font-semibold text-emerald-700 hover:text-emerald-900 hover:underline focus:outline-none"
+                title="Vedi statistiche 2024/25"
+              >
+                {p.giocatore}
+              </button>
+            ) : (
+              <span className="text-sm font-medium text-gray-900">{p.giocatore}</span>
+            )}
+            <div className="text-xs text-gray-500">
+              {p.squadraSerieA !== '#N/A' ? p.squadraSerieA : '-'}
+            </div>
+          </div>
+        </td>
 
-                {filteredData.length > 0 && (
-                  <tr className="bg-gray-100 font-bold">
-                    <td colSpan={3} className="px-6 py-3 text-right text-sm text-gray-900">TOTALI:</td>
-                    <td className="px-6 py-3 whitespace-nowrap">
-                      <span className="text-sm font-bold text-green-700">
-                        {filteredData.reduce((sum, p) => sum + (parseFloat(String(p.valoreXMercato)) || 0), 0).toFixed(0)}
-                      </span>
-                    </td>
-                    <td className="px-6 py-3 whitespace-nowrap">
-                      <div className="text-xs text-orange-700 font-bold">
-                        {filteredData.reduce((sum, p) => sum + (parseFloat(String(p.ingaggioReale)) || 0), 0).toFixed(1)}
-                      </div>
-                    </td>
-                    <td className="px-6 py-3"></td>
-                  </tr>
-                )}
-              </tbody>
+        <td className="px-6 py-4 whitespace-nowrap">
+          <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+            {formatRuolo(p.ruolo)}
+          </span>
+        </td>
+        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{p.tipoContratto || '-'}</td>
+        <td className="px-6 py-4 whitespace-nowrap">
+          <span className="text-sm font-semibold text-gray-900">{formatFVM(p.valoreXMercato)}</span>
+        </td>
+        <td className="px-6 py-4 whitespace-nowrap">
+          <div className="text-xs">
+            <div className="text-gray-700">
+              <span className="font-medium">Competenza:</span>{' '}
+              <span className="text-orange-600 font-semibold">{formatIngaggio(p.ingaggioReale)}</span>
+            </div>
+            <div className="text-gray-600">
+              <span className="font-medium">Giocatore:</span>{' '}
+              <span className="text-gray-800">{formatIngaggio(p.ingaggio36)}</span>
+            </div>
+          </div>
+        </td>
+        <td className="px-6 py-4 whitespace-nowrap">
+          <span className={`px-2 py-1 text-xs font-medium rounded-full ${inScadenza ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
+            {formatDate(p.scadenzaIpotizzata)}
+          </span>
+        </td>
+      </tr>
+    );
+  }) : (
+    <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-500">Nessun giocatore trovato con i filtri selezionati</td></tr>
+  )}
+
+  {filteredData.length > 0 && (
+    <tr className="bg-gray-100 font-bold">
+      <td colSpan={3} className="px-6 py-3 text-right text-sm text-gray-900">TOTALI:</td>
+      <td className="px-6 py-3 whitespace-nowrap">
+        <span className="text-sm font-bold text-green-700">
+          {filteredData.reduce((sum, p) => sum + (parseFloat(String(p.valoreXMercato)) || 0), 0).toFixed(0)}
+        </span>
+      </td>
+      <td className="px-6 py-3 whitespace-nowrap">
+        <div className="text-xs text-orange-700 font-bold">
+          {filteredData.reduce((sum, p) => sum + (parseFloat(String(p.ingaggioReale)) || 0), 0).toFixed(1)}
+        </div>
+      </td>
+      <td className="px-6 py-3"></td>
+    </tr>
+  )}
+</tbody>
+
             </table>
             <div className="pointer-events-none absolute right-2 bottom-2 text-xs text-gray-500 bg-white/80 rounded px-2 py-1 shadow-sm md:hidden">Scorri →</div>
           </div>
@@ -1017,14 +1028,25 @@ async function openPlayerStats(name: string, tla: string) {
         </div>
       </div>
       {/* --- MODAL STATISTICHE GIOCATORE --- */}
-{playerModalOpen && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center">
+{ENABLE_STATS && playerModalOpen && (
+  /* ...modal... */ 
+  <div
+    className="fixed inset-0 z-50 flex items-center justify-center"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="player-stats-title"
+    onKeyDown={(e) => e.key === 'Escape' && setPlayerModalOpen(false)}
+    tabIndex={-1}
+  >
     {/* backdrop */}
-    <div className="absolute inset-0 bg-black/40" onClick={() => setPlayerModalOpen(false)} />
+    <div
+      className="absolute inset-0 bg-black/40"
+      onClick={() => setPlayerModalOpen(false)}
+    />
     {/* card */}
     <div className="relative z-10 w-[92vw] max-w-2xl bg-white rounded-xl shadow-2xl border">
       <div className="px-5 py-4 border-b flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-gray-900">
+        <h3 id="player-stats-title" className="text-lg font-semibold text-gray-900">
           {playerStats?.player?.name ? `Statistiche • ${playerStats.player.name}` : 'Statistiche giocatore'}
         </h3>
         <button
@@ -1042,6 +1064,12 @@ async function openPlayerStats(name: string, tla: string) {
             Caricamento…
           </div>
         )}
+        {/* ...resto del contenuto... */}
+      </div>
+    </div>
+  </div>
+)}
+
 
         {!playerLoading && playerError && (
           <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">
