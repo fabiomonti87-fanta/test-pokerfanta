@@ -319,6 +319,53 @@ const FantacalcioManager: React.FC = () => {
 
   const bestLineup = useBestLineup(organicoPlayers, formationChoice);
 
+  // --- STATISTICHE GIOCATORE (modal) ---
+const [playerModalOpen, setPlayerModalOpen] = useState(false);
+const [playerLoading, setPlayerLoading] = useState(false);
+const [playerError, setPlayerError] = useState<string | null>(null);
+const [playerStats, setPlayerStats] = useState<null | {
+  team: { id: number; name: string; tla?: string };
+  player: { id: number; name: string };
+  season: string;
+  range: { dateFrom: string; dateTo: string };
+  aggregations: {
+    matchesOnPitch?: number;
+    startingXI?: number;
+    minutesPlayed?: number;
+    goals?: number;
+    assists?: number;
+    yellowCards?: number;
+    yellowRedCards?: number;
+    redCards?: number;
+    subbedOut?: number;
+    subbedIn?: number;
+  };
+  recentMatches: Array<{
+    utcDate: string;
+    competition: { code: string; name: string };
+    homeTeam: { name: string };
+    awayTeam: { name: string };
+    score: { fullTime: { home: number | null; away: number | null } };
+  }>;
+}>(null);
+
+async function openPlayerStats(name: string, tla: string) {
+  try {
+    setPlayerError(null);
+    setPlayerLoading(true);
+    setPlayerModalOpen(true);
+    const res = await fetch(`/api/player-stats?name=${encodeURIComponent(name)}&tla=${encodeURIComponent(tla)}`);
+    const json = await res.json();
+    if (!res.ok) throw new Error(json?.error || 'Errore sconosciuto');
+    setPlayerStats(json);
+  } catch (e: any) {
+    setPlayerStats(null);
+    setPlayerError(e?.message || 'Errore');
+  } finally {
+    setPlayerLoading(false);
+  }
+}
+
   // ------------------- RENDER -------------------
 
   if (!fileLoaded) {
@@ -891,12 +938,20 @@ const FantacalcioManager: React.FC = () => {
                   else if (p.tipoContratto && (String(p.tipoContratto).toLowerCase().includes('obbligo') || String(p.tipoContratto).toLowerCase().includes('diritto'))) rowBg = 'bg-yellow-100';
                   return (
                     <tr key={`${p.id ?? i}-${p.giocatore}`} className={`hover:bg-gray-50 transition-colors ${rowBg}`}>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">{p.giocatore}</div>
-                          <div className="text-xs text-gray-500">{p.squadraSerieA !== '#N/A' ? p.squadraSerieA : '-'}</div>
-                        </div>
-                      </td>
+                     <td className="px-6 py-4 whitespace-nowrap">
+  <div>
+    <button
+      type="button"
+      onClick={() => openPlayerStats(p.giocatore, String(p.squadraSerieA || '').toUpperCase())}
+      className="text-left text-sm font-semibold text-emerald-700 hover:text-emerald-900 hover:underline focus:outline-none"
+      title="Vedi statistiche 2024/25"
+    >
+      {p.giocatore}
+    </button>
+    <div className="text-xs text-gray-500">{p.squadraSerieA !== '#N/A' ? p.squadraSerieA : '-'}</div>
+  </div>
+</td>
+
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
                           {formatRuolo(p.ruolo)}
@@ -960,6 +1015,119 @@ const FantacalcioManager: React.FC = () => {
           </label>
         </div>
       </div>
+      {/* --- MODAL STATISTICHE GIOCATORE --- */}
+{playerModalOpen && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center">
+    {/* backdrop */}
+    <div className="absolute inset-0 bg-black/40" onClick={() => setPlayerModalOpen(false)} />
+    {/* card */}
+    <div className="relative z-10 w-[92vw] max-w-2xl bg-white rounded-xl shadow-2xl border">
+      <div className="px-5 py-4 border-b flex items-center justify-between">
+        <h3 className="text-lg font-semibold text-gray-900">
+          {playerStats?.player?.name ? `Statistiche • ${playerStats.player.name}` : 'Statistiche giocatore'}
+        </h3>
+        <button
+          className="rounded-md px-2 py-1 text-gray-600 hover:bg-gray-100"
+          onClick={() => setPlayerModalOpen(false)}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="p-5">
+        {playerLoading && (
+          <div className="flex items-center gap-2 text-gray-600">
+            <div className="h-5 w-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+            Caricamento…
+          </div>
+        )}
+
+        {!playerLoading && playerError && (
+          <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">
+            {playerError}
+          </div>
+        )}
+
+        {!playerLoading && !playerError && playerStats && (
+          <>
+            <div className="text-sm text-gray-600 mb-3">
+              {playerStats.team?.name} ({playerStats.team?.tla}) • Stagione {playerStats.season}
+            </div>
+
+            {/* KPI */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="text-xs text-gray-500">Presenze</div>
+                <div className="text-xl font-bold">{playerStats.aggregations.matchesOnPitch ?? 0}</div>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="text-xs text-gray-500">Titolare</div>
+                <div className="text-xl font-bold">{playerStats.aggregations.startingXI ?? 0}</div>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="text-xs text-gray-500">Minuti</div>
+                <div className="text-xl font-bold">{playerStats.aggregations.minutesPlayed ?? 0}</div>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="text-xs text-gray-500">Gol</div>
+                <div className="text-xl font-bold">{playerStats.aggregations.goals ?? 0}</div>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="text-xs text-gray-500">Assist</div>
+                <div className="text-xl font-bold">{playerStats.aggregations.assists ?? 0}</div>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="text-xs text-gray-500">Gialli</div>
+                <div className="text-xl font-bold">{playerStats.aggregations.yellowCards ?? 0}</div>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="text-xs text-gray-500">Giallo+Rosso</div>
+                <div className="text-xl font-bold">{playerStats.aggregations.yellowRedCards ?? 0}</div>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="text-xs text-gray-500">Rossi</div>
+                <div className="text-xl font-bold">{playerStats.aggregations.redCards ?? 0}</div>
+              </div>
+            </div>
+
+            {/* Ultime partite */}
+            <div>
+              <div className="text-sm font-semibold text-gray-800 mb-2">Ultime partite</div>
+              {playerStats.recentMatches.length === 0 ? (
+                <div className="text-sm text-gray-500">Nessun match in range.</div>
+              ) : (
+                <ul className="space-y-2">
+                  {playerStats.recentMatches.map((m, i) => {
+                    const dt = new Date(m.utcDate);
+                    const fh = m.score?.fullTime?.home;
+                    const fa = m.score?.fullTime?.away;
+                    return (
+                      <li key={i} className="flex items-center justify-between border rounded-lg px-3 py-2">
+                        <div className="text-sm">
+                          <span className="font-medium">{m.homeTeam.name}</span> – <span className="font-medium">{m.awayTeam.name}</span>
+                          <span className="ml-2 text-gray-500 text-xs">{m.competition?.code || m.competition?.name}</span>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xs text-gray-500">
+                            {dt.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
+                          </div>
+                          {fh != null && fa != null && (
+                            <div className="text-sm font-semibold">{fh}–{fa}</div>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  </div>
+)}
+
     </div>
   );
 };
