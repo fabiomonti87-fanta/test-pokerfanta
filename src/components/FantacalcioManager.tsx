@@ -1,3 +1,4 @@
+'use client';
 // src/components/FantacalcioManager.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
@@ -7,17 +8,24 @@ import {
 } from 'lucide-react';
 
 import {
-  useBestLineup, ROLE_OPTIONS, FormationKey, Player,
+  useBestLineup, ROLE_OPTIONS, FormationKey, Player, Role,
   getFVM as getFvmHook, parseRoles
 } from '../hooks/useBestLineup';
 
-// Per compatibilita con window.fs opzionale
+// compat opzionale per window.fs (auto-load)
 declare global {
   interface Window {
     fs?: { readFile: (name: string) => Promise<ArrayBuffer> }
   }
 }
 
+/** TIPI ACQUISTO: file-level (evita warning deps) */
+const TIPI_ACQUISTO_DEFAULT = [
+  'Acquistato tit definitivo', 'Asta', 'Asta riparazione',
+  'Ceduto in prestito', 'Vivaio', 'Promosso da vivaio'
+] as const;
+
+/** moduli mostrati nel select (puoi ampliarla) */
 const FORMATION_KEYS: FormationKey[] = ['4-3-3','4-4-2','3-5-2','3-4-3','4-2-3-1'];
 
 const FantacalcioManager: React.FC = () => {
@@ -32,31 +40,24 @@ const FantacalcioManager: React.FC = () => {
   const [fileLoaded, setFileLoaded] = useState<boolean>(false);
   const [currentView, setCurrentView] = useState<'squadra'|'riepilogo'>('squadra');
 
-  // Ricerca & filtri ruoli (OR)
+  // Ricerca & ruoli (OR)
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedRoles, setSelectedRoles] = useState<Set<string>>(new Set());
+  const [selectedRoles, setSelectedRoles] = useState<Set<Role>>(new Set());
 
   // Home search
   const [homeQuery, setHomeQuery] = useState<string>('');
 
-  // Formazione + Campo (hidden by default)
+  // Formazione + Campo (nascosto di default)
   const [formationChoice, setFormationChoice] = useState<'auto'|FormationKey>('auto');
   const [showPitch, setShowPitch] = useState<boolean>(false);
 
-  // Tipi di acquisto validi
-  const tipiAcquistoDefault = [
-    'Acquistato tit definitivo', 'Asta', 'Asta riparazione',
-    'Ceduto in prestito', 'Vivaio', 'Promosso da vivaio'
+  // Partite Serie A (widget Home)
+  const [matches, setMatches] = useState<
+    { utcDate: string; homeTeam: { name: string }; awayTeam: { name: string } }[]
+  >([]);
 
-    // subito dopo altri useState
-const [matches, setMatches] = useState<
-  { utcDate: string; homeTeam: { name: string }; awayTeam: { name: string } }[]
->([]);
-
-  ];
-
+  // Autoload locale (se presente window.fs)
   useEffect(() => {
-    // Autoload da window.fs se presente
     if (typeof window !== 'undefined' && window.fs?.readFile) {
       (async () => {
         try {
@@ -66,7 +67,7 @@ const [matches, setMatches] = useState<
               const buf = await window.fs.readFile(name);
               processExcelData(buf);
               return;
-            } catch { /* tenta il successivo */ }
+            } catch { /* tenta il prossimo */ }
           }
           setLoading(false);
         } catch {
@@ -75,6 +76,19 @@ const [matches, setMatches] = useState<
       })();
     }
   }, []);
+
+  // Widget partite: fetch solo quando sei in Home
+  useEffect(() => {
+    if (currentView !== 'riepilogo') return;
+    const d = new Date();
+    const df = d.toISOString().slice(0, 10);
+    const d2 = new Date(d.getTime() + 7 * 86400000).toISOString().slice(0, 10);
+
+    fetch(`/api/sa-matches?status=SCHEDULED&dateFrom=${df}&dateTo=${d2}`)
+      .then(r => r.json())
+      .then(j => setMatches(Array.isArray(j?.matches) ? j.matches.slice(0, 10) : []))
+      .catch(() => setMatches([]));
+  }, [currentView]);
 
   const handleFileUpload: React.ChangeEventHandler<HTMLInputElement> = (e) => {
     const file = e.target.files?.[0];
@@ -106,22 +120,22 @@ const [matches, setMatches] = useState<
       [17,'Seconda Punta','Dinamo Splash','NAP','A','-','2024-09-01','2027-07-01','Asta','', '', 0, 0, 0, '', 40, 2.4, 1.6],
     ];
     const processed: Player[] = demo.map(row => ({
-      id: row[0] as number, 
-      giocatore: row[1] as string, 
-      squadraFantacalcio: row[2] as string, 
+      id: row[0] as number,
+      giocatore: row[1] as string,
+      squadraFantacalcio: row[2] as string,
       squadraSerieA: row[3] as string,
-      ruolo: row[4] as string, 
-      tipoContratto: row[5] as string, 
-      dataAcquisto: row[6] as string, 
+      ruolo: row[4] as string,
+      tipoContratto: row[5] as string,
+      dataAcquisto: row[6] as string,
       scadenzaIpotizzata: row[7] as string,
-      tipoAcquisto: row[8] as string, 
-      valAsteriscato: row[9] as string, 
-      scambioIngaggio: row[10] as string, 
+      tipoAcquisto: row[8] as string,
+      valAsteriscato: row[9] as string,
+      scambioIngaggio: row[10] as string,
       valoreAcquisto: row[11] as number,
-      fvm2425: row[12] as number, 
-      ultimoFVM: row[13] as number, 
-      valoreXMercato: row[15] as number, 
-      ingaggio36: row[16] as number, 
+      fvm2425: row[12] as number,
+      ultimoFVM: row[13] as number,
+      valoreXMercato: row[15] as number,
+      ingaggio36: row[16] as number,
       ingaggioReale: row[17] as number
     }));
     setAllData(processed);
@@ -135,29 +149,29 @@ const [matches, setMatches] = useState<
   const processExcelData = (data: ArrayBuffer) => {
     try {
       const wb = XLSX.read(data, { type: 'array', cellStyles: true, cellFormulas: true, cellDates: true, cellNF: true, sheetStubs: true });
-      if (!wb.Sheets['Gestionale']) { setError('Il file non contiene il foglio "Gestionale".'); setLoading(false); return; }
-      const raw: unknown[][] = XLSX.utils.sheet_to_json(wb.Sheets['Gestionale'], { header: 1 }) as unknown[][];
+      if (!wb.Sheets['Gestionale']) { setError('Il file non contiene il foglio &quot;Gestionale&quot;.'); setLoading(false); return; }
+      const raw = XLSX.utils.sheet_to_json(wb.Sheets['Gestionale'], { header: 1 }) as unknown[][];
       const rows: Player[] = [];
       for (let i = 1; i < raw.length; i++) {
         const r = raw[i] as unknown[];
         if (r && r[1] && r[1] !== '#N/A') {
           rows.push({
-            id: r[0] as number, 
-            giocatore: r[1] as string, 
-            squadraFantacalcio: r[2] as string, 
-            squadraSerieA: r[3] as string, 
+            id: r[0] as number,
+            giocatore: r[1] as string,
+            squadraFantacalcio: r[2] as string,
+            squadraSerieA: r[3] as string,
             ruolo: r[4] as string,
-            tipoContratto: r[5] as string, 
-            dataAcquisto: r[6] as string, 
-            scadenzaIpotizzata: r[7] as string, 
+            tipoContratto: r[5] as string,
+            dataAcquisto: r[6] as string,
+            scadenzaIpotizzata: r[7] as string,
             tipoAcquisto: r[8] as string,
-            valAsteriscato: r[9] as string, 
-            scambioIngaggio: r[10] as string, 
-            valoreAcquisto: r[11] as number, 
+            valAsteriscato: r[9] as string,
+            scambioIngaggio: r[10] as string,
+            valoreAcquisto: r[11] as number,
             fvm2425: r[12] as number,
-            ultimoFVM: r[13] as number, 
-            valoreXMercato: r[15] as number, 
-            ingaggio36: r[16] as number, 
+            ultimoFVM: r[13] as number,
+            valoreXMercato: r[15] as number,
+            ingaggio36: r[16] as number,
             ingaggioReale: r[17] as number
           });
         }
@@ -169,11 +183,11 @@ const [matches, setMatches] = useState<
       setSquadre(uniq);
 
       if (wb.Sheets['Sintesi Squadre']) {
-        const sintesi: unknown[][] = XLSX.utils.sheet_to_json(wb.Sheets['Sintesi Squadre'], { header: 1 }) as unknown[][];
+        const sintesi = XLSX.utils.sheet_to_json(wb.Sheets['Sintesi Squadre'], { header: 1 }) as unknown[][];
         const cred: Record<string, number> = {};
         for (let i = 18; i < sintesi.length; i++) {
           const r = sintesi[i] as unknown[];
-          if (r && r[0]) cred[r[0] as string] = parseFloat(r[1] as string) || 0;
+          if (r && r[0]) cred[r[0] as string] = parseFloat(String(r[1])) || 0;
         }
         setCreditiSquadre(cred);
       }
@@ -185,7 +199,7 @@ const [matches, setMatches] = useState<
     }
   };
 
-  // Helpers di formattazione
+  // Helpers
   const formatDate = (v?: string | Date) => {
     if (!v || v === '#N/A') return '-';
     try { return new Date(v).toLocaleDateString('it-IT'); } catch { return '-'; }
@@ -197,10 +211,10 @@ const [matches, setMatches] = useState<
     const n = parseFloat(String(v)); return isNaN(n) ? '-' : n.toFixed(1);
   };
 
-  // Calcoli riepilogo
+  // Calcoli Home
   const calculateValoreInScadenza = (squadra: string) => allData
     .filter(p => p.squadraFantacalcio === squadra
-      && tipiAcquistoDefault.includes(String(p.tipoAcquisto))
+      && TIPI_ACQUISTO_DEFAULT.includes(p.tipoAcquisto as (typeof TIPI_ACQUISTO_DEFAULT)[number])
       && p.scadenzaIpotizzata && p.scadenzaIpotizzata !== '#N/A'
       && new Date(p.scadenzaIpotizzata).getDate() === 1
       && new Date(p.scadenzaIpotizzata).getMonth() === 6
@@ -211,14 +225,15 @@ const [matches, setMatches] = useState<
     (creditiSquadre[squadra] || 0) + calculateValoreInScadenza(squadra);
 
   const calculateTotaleIngaggi = (squadra: string) => allData
-    .filter(p => p.squadraFantacalcio === squadra && tipiAcquistoDefault.includes(String(p.tipoAcquisto)))
+    .filter(p => p.squadraFantacalcio === squadra
+      && TIPI_ACQUISTO_DEFAULT.includes(p.tipoAcquisto as (typeof TIPI_ACQUISTO_DEFAULT)[number]))
     .reduce((s, p) => s + (parseFloat(String(p.ingaggioReale)) || 0), 0);
 
   const calculateContrattiPluriennali = (squadra: string) => allData
     .filter(p => {
       if (p.squadraFantacalcio !== squadra) return false;
-      const organico = tipiAcquistoDefault.filter(t => t !== 'Vivaio');
-      if (!organico.includes(String(p.tipoAcquisto))) return false;
+      const organico = TIPI_ACQUISTO_DEFAULT.filter(t => t !== 'Vivaio');
+      if (!organico.includes(p.tipoAcquisto as (typeof TIPI_ACQUISTO_DEFAULT)[number])) return false;
       if (!p.scadenzaIpotizzata || p.scadenzaIpotizzata === '#N/A') return false;
       const scad = new Date(p.scadenzaIpotizzata);
       if (!(scad > new Date('2025-07-01'))) return false;
@@ -235,7 +250,9 @@ const [matches, setMatches] = useState<
 
       if (filterType === 'vivaio' && !(p.tipoAcquisto === 'Vivaio' || p.tipoAcquisto === 'Promosso da vivaio')) return false;
 
-      const tipi = filterType === 'organico' ? tipiAcquistoDefault.filter(t => t !== 'Vivaio') : tipiAcquistoDefault;
+      const tipi = filterType === 'organico'
+        ? (TIPI_ACQUISTO_DEFAULT.filter(t => t !== 'Vivaio') as readonly string[])
+        : (TIPI_ACQUISTO_DEFAULT as readonly string[]);
       if (!tipi.includes(String(p.tipoAcquisto))) return false;
 
       if (filterType === 'nonInListone') {
@@ -272,9 +289,9 @@ const [matches, setMatches] = useState<
       return true;
     });
     setFilteredData(res);
-  }, [selectedSquadra, filterType, allData, normalizedQuery, selectedRoles, tipiAcquistoDefault]);
+  }, [selectedSquadra, filterType, allData, normalizedQuery, selectedRoles]);
 
-  const toggleRole = (r: string) => setSelectedRoles(prev => {
+  const toggleRole = (r: Role) => setSelectedRoles(prev => {
     const n = new Set(prev); n.has(r) ? n.delete(r) : n.add(r); return n;
   });
 
@@ -291,14 +308,14 @@ const [matches, setMatches] = useState<
     return allData
       .filter(p => p.squadraFantacalcio === selectedSquadra)
       .filter(p => {
-        const organicoTypes = tipiAcquistoDefault.filter(t => t !== 'Vivaio');
-        if (!organicoTypes.includes(String(p.tipoAcquisto))) return false;
+        const organicoTypes = TIPI_ACQUISTO_DEFAULT.filter(t => t !== 'Vivaio');
+        if (!organicoTypes.includes(p.tipoAcquisto as (typeof TIPI_ACQUISTO_DEFAULT)[number])) return false;
         if (!p.scadenzaIpotizzata || p.scadenzaIpotizzata === '#N/A') return false;
         const scad = new Date(p.scadenzaIpotizzata);
         if (!(scad > new Date('2025-07-01'))) return false;
         return getFvmHook(p) > 0;
       });
-  }, [allData, selectedSquadra, tipiAcquistoDefault]);
+  }, [allData, selectedSquadra]);
 
   const bestLineup = useBestLineup(organicoPlayers, formationChoice);
 
@@ -373,102 +390,61 @@ const [matches, setMatches] = useState<
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-3 md:p-4">
         <div className="max-w-5xl mx-auto">
+          {/* Header Home */}
           <div className="bg-white rounded-xl shadow-lg p-4 md:p-6 mb-4">
-           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-  <h1 className="text-2xl md:text-3xl font-bold text-gray-800 flex items-center gap-2">
-    <Home className="text-green-600" /> Home - Riepilogo Squadre
-  </h1>
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <h1 className="text-2xl md:text-3xl font-bold text-gray-800 flex items-center gap-2">
+                <Home className="text-green-600" /> Home - Riepilogo Squadre
+              </h1>
 
-  {/* Search + selettore squadra + pulsante Vai al dettaglio */}
-  <div className="flex w-full md:w-auto items-center gap-3">
-    {/* Search squadre */}
-    <div className="relative w-full md:w-80">
-      <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-      <input
-        value={homeQuery}
-        onChange={(e) => setHomeQuery(e.target.value)}
-        placeholder="Cerca squadra…"
-        className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-      />
-      {homeQuery && (
-        <button
-          onClick={() => setHomeQuery('')}
-          className="absolute right-2 top-2 h-7 w-7 rounded-md hover:bg-gray-100 flex items-center justify-center"
-          aria-label="Pulisci ricerca squadre"
-        >
-          <X className="h-4 w-4 text-gray-500" />
-        </button>
-      )}
-    </div>
+              {/* Search + selettore squadra + pulsante Vai al dettaglio */}
+              <div className="flex w-full md:w-auto items-center gap-3">
+                {/* Search squadre */}
+                <div className="relative w-full md:w-80">
+                  <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+                  <input
+                    value={homeQuery}
+                    onChange={(e) => setHomeQuery(e.target.value)}
+                    placeholder="Cerca squadra…"
+                    className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  />
+                  {homeQuery && (
+                    <button
+                      onClick={() => setHomeQuery('')}
+                      className="absolute right-2 top-2 h-7 w-7 rounded-md hover:bg-gray-100 flex items-center justify-center"
+                      aria-label="Pulisci ricerca squadre"
+                    >
+                      <X className="h-4 w-4 text-gray-500" />
+                    </button>
+                  )}
+                </div>
 
-    {/* Selettore + pulsante per entrare nel dettaglio */}
-    <div className="flex items-center gap-2">
-      <select
-        value={selectedSquadra}
-        onChange={(e) => setSelectedSquadra(e.target.value)}
-        className="px-3 py-2 border rounded-lg"
-        aria-label="Seleziona squadra"
-      >
-        {squadre.map((s) => (
-          <option key={s} value={s}>{s}</option>
-        ))}
-      </select>
+                {/* Selettore + pulsante per entrare nel dettaglio */}
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedSquadra}
+                    onChange={(e) => setSelectedSquadra(e.target.value)}
+                    className="px-3 py-2 border rounded-lg"
+                    aria-label="Seleziona squadra"
+                  >
+                    {squadre.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
 
-      <button
-        onClick={() => setCurrentView('squadra')}
-        className="px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
-      >
-        Vai al dettaglio
-      </button>
-    </div>
-  </div>
-</div>
+                  <button
+                    onClick={() => setCurrentView('squadra')}
+                    className="px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+                  >
+                    Vai al dettaglio
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
 
-
+          {/* Tabella + Legenda */}
           <div className="bg-white rounded-xl shadow-lg overflow-hidden relative">
-// ===== HOME =====
-if (currentView === 'riepilogo') {
-  return (
-    <div className="min-h-screen ...">
-      <div className="max-w-5xl mx-auto">
-
-        {/* [A] HEADER (dove hai aggiunto Select + "Vai al dettaglio") */}
-        <div className="bg-white rounded-xl shadow-lg p-4 md:p-6 mb-4"> ... </div>
-
-        {/* [B] TABELLA + LEGENDA */}
-        <div className="bg-white rounded-xl shadow-lg overflow-hidden relative">
-          {/* ...tutta la tabella + legenda... */}
-        </div>
-
-        {/* [C] ➜ QUI INCOLLA IL WIDGET PARTITE */}
-        <div className="mt-6 bg-white rounded-xl shadow p-4">
-          <h3 className="text-lg font-semibold text-gray-800 mb-3">
-            Prossime partite Serie A (7 giorni)
-          </h3>
-          {matches.length === 0 ? (
-            <p className="text-sm text-gray-500">Nessuna partita trovata.</p>
-          ) : (
-            <ul className="text-sm text-gray-800 grid md:grid-cols-2 gap-2">
-              {matches.map((m, i) => {
-                const dt = new Date(m.utcDate);
-                return (
-                  <li key={i} className="flex items-center justify-between border rounded-lg px-3 py-2">
-                    <span className="font-medium">{m.homeTeam.name} – {m.awayTeam.name}</span>
-                    <span className="text-gray-500">
-                      {dt.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-
-      </div>
-    </div>
-  );
-}
-
             <div className="overflow-x-auto">
               <table className="min-w-[720px] w-full text-sm">
                 <thead className="bg-gradient-to-r from-green-600 to-green-700">
@@ -527,6 +503,7 @@ if (currentView === 'riepilogo') {
               </table>
             </div>
 
+            {/* Legenda */}
             <div className="p-3 md:p-4 bg-gray-50 border-t text-[12px] md:text-xs text-gray-600">
               <p className="mb-1"><strong>Legenda:</strong></p>
               <ul className="space-y-1">
@@ -535,38 +512,31 @@ if (currentView === 'riepilogo') {
               </ul>
             </div>
           </div>
+
+          {/* Widget Prossime partite Serie A */}
+          <div className="mt-6 bg-white rounded-xl shadow p-4">
+            <h3 className="text-lg font-semibold text-gray-800 mb-3">Prossime partite Serie A (7 giorni)</h3>
+            {matches.length === 0 ? (
+              <p className="text-sm text-gray-500">Nessuna partita trovata.</p>
+            ) : (
+              <ul className="text-sm text-gray-800 grid md:grid-cols-2 gap-2">
+                {matches.map((m, i) => {
+                  const dt = new Date(m.utcDate);
+                  return (
+                    <li key={i} className="flex items-center justify-between border rounded-lg px-3 py-2">
+                      <span className="font-medium">{m.homeTeam.name} – {m.awayTeam.name}</span>
+                      <span className="text-gray-500">
+                        {dt.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
         </div>
       </div>
     );
-        
-        // stato
-const [matches, setMatches] = useState<
-  { utcDate: string; homeTeam: { name: string }; awayTeam: { name: string } }[]
->([]);
-
-// fetch al mount
-useEffect(() => {
-  if (currentView !== 'riepilogo') return; // solo quando sei in Home
-  const d = new Date();
-  const df = d.toISOString().slice(0, 10);
-  const d2 = new Date(d.getTime() + 7 * 86400000).toISOString().slice(0, 10);
-
-  fetch(`/api/sa-matches?status=SCHEDULED&dateFrom=${df}&dateTo=${d2}`)
-    .then(r => r.json())
-    .then(j => setMatches(Array.isArray(j?.matches) ? j.matches.slice(0, 10) : []))
-    .catch(() => setMatches([]));
-}, [currentView]);
-
-useEffect(() => {
-  const d = new Date();
-  const df = d.toISOString().slice(0,10);
-  const d2 = new Date(d.getTime() + 7*86400000).toISOString().slice(0,10);
-
-  fetch(`/api/sa-matches?status=SCHEDULED&dateFrom=${df}&dateTo=${d2}`)
-    .then(r => r.json())
-    .then(j => setMatches(Array.isArray(j?.matches) ? j.matches.slice(0,10) : []))
-    .catch(() => setMatches([]));
-}, []);
   }
 
   // ===== DETTAGLIO =====
@@ -594,7 +564,7 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* Cards riepilogo rapidi */}
+        {/* Cards */}
         {selectedSquadra && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div className="bg-white rounded-lg shadow p-4">
@@ -681,7 +651,7 @@ useEffect(() => {
                 <input
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
-                  placeholder={`Cerca nella rosa di ${selectedSquadra || 'squadra'}...`}
+                  placeholder={`Cerca nella rosa di ${selectedSquadra || 'squadra'}…`}
                   className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                 />
                 {searchQuery && (
@@ -694,7 +664,7 @@ useEffect(() => {
                   </button>
                 )}
               </div>
-              <p className="mt-1 text-xs text-gray-500">La ricerca e limitata alla squadra selezionata.</p>
+              <p className="mt-1 text-xs text-gray-500">La ricerca è limitata alla squadra selezionata.</p>
             </div>
 
             {/* Toggle Ruoli (OR) */}
@@ -702,12 +672,12 @@ useEffect(() => {
               <label className="block text-sm font-medium text-gray-700 mb-2">Filtra per ruolo (OR)</label>
               <div className="flex flex-wrap gap-2">
                 {ROLE_OPTIONS.map(r => {
-                  const active = selectedRoles.has(r);
+                  const active = selectedRoles.has(r as Role);
                   return (
                     <button
                       key={r}
                       type="button"
-                      onClick={() => toggleRole(r)}
+                      onClick={() => toggleRole(r as Role)}
                       aria-pressed={active}
                       className={`px-3 py-1.5 rounded-full text-sm font-medium border transition ${
                         active ? 'bg-green-600 text-white border-green-600' : 'bg-gray-50 text-gray-700 border-gray-300 hover:bg-gray-100'
@@ -737,7 +707,7 @@ useEffect(() => {
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
             >
               <Eye className="h-4 w-4" />
-              {showPitch ? 'Nascondi campo' : 'Oggi giocherebbero cosi'}
+              {showPitch ? 'Nascondi campo' : 'Oggi giocherebbero così'}
             </button>
           </div>
         </div>
@@ -747,8 +717,8 @@ useEffect(() => {
           <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
             <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
               <div>
-                <h3 className="text-xl font-semibold text-gray-900">Oggi giocherebbero cosi</h3>
-                <p className="text-sm text-gray-500">Scelta basata sull&apos;organico (scadenza &gt; 01/07/2025) e FVM piu alto, nel rispetto dei ruoli Mantra.</p>
+                <h3 className="text-xl font-semibold text-gray-900">Oggi giocherebbero così</h3>
+                <p className="text-sm text-gray-500">Scelta basata sull’organico (scadenza &gt; 01/07/2025) e FVM più alto, nel rispetto dei ruoli Mantra.</p>
               </div>
               <div className="w-full md:w-64">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Formazione</label>
@@ -763,58 +733,51 @@ useEffect(() => {
               </div>
             </div>
 
-           {/* Campo stilizzato (SVG) */}
-<div className="mt-4 overflow-x-auto">
-  <div className="min-w-[700px]">
-    <div className="relative w-full rounded-xl border bg-emerald-900/10" style={{paddingTop:'60%'}}>
-      {/* SVG field */}
-      <svg viewBox="0 0 105 68" className="absolute inset-0 w-full h-full">
-        <defs>
-          {/* bande orizzontali */}
-          <pattern id="grass" width="4" height="4" patternUnits="userSpaceOnUse">
-            <rect width="4" height="4" fill="#127a39"/>
-            <rect width="4" height="2" fill="#0f6a32"/>
-          </pattern>
-        </defs>
-        <rect x="1.5" y="1.5" width="102" height="65" rx="2" fill="url(#grass)" stroke="#ffffff" strokeWidth="1.5"/>
-        {/* linea metà campo */}
-        <line x1="52.5" y1="1.5" x2="52.5" y2="66.5" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
-        {/* cerchio di centrocampo */}
-        <circle cx="52.5" cy="34" r="9" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
-        {/* aree di rigore */}
-        {/* alto */}
-        <rect x="24" y="1.5" width="57" height="12" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
-        <rect x="34.5" y="1.5" width="36" height="4.5" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
-        {/* basso */}
-        <rect x="24" y="54.5" width="57" height="12" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
-        <rect x="34.5" y="62" width="36" height="4.5" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
-        {/* dischetti */}
-        <circle cx="52.5" cy="11" r="0.8" fill="#fff"/>
-        <circle cx="52.5" cy="57" r="0.8" fill="#fff"/>
-      </svg>
+            {/* Campo stilizzato (SVG) */}
+            <div className="mt-4 overflow-x-auto">
+              <div className="min-w-[700px]">
+                <div className="relative w-full rounded-xl border bg-emerald-900/10" style={{paddingTop:'60%'}}>
+                  <svg viewBox="0 0 105 68" className="absolute inset-0 w-full h-full">
+                    <defs>
+                      <pattern id="grass" width="4" height="4" patternUnits="userSpaceOnUse">
+                        <rect width="4" height="4" fill="#127a39"/>
+                        <rect width="4" height="2" fill="#0f6a32"/>
+                      </pattern>
+                    </defs>
+                    <rect x="1.5" y="1.5" width="102" height="65" rx="2" fill="url(#grass)" stroke="#ffffff" strokeWidth="1.5"/>
+                    <line x1="52.5" y1="1.5" x2="52.5" y2="66.5" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
+                    <circle cx="52.5" cy="34" r="9" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
+                    {/* area alto */}
+                    <rect x="24" y="1.5" width="57" height="12" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
+                    <rect x="34.5" y="1.5" width="36" height="4.5" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
+                    {/* area basso */}
+                    <rect x="24" y="54.5" width="57" height="12" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
+                    <rect x="34.5" y="62" width="36" height="4.5" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
+                    <circle cx="52.5" cy="11" r="0.8" fill="#fff"/>
+                    <circle cx="52.5" cy="57" r="0.8" fill="#fff"/>
+                  </svg>
 
-      {/* giocatori posizionati */}
-      {bestLineup && bestLineup.assigned.map((a,i)=>{
-        const p = a.player;
-        const left = `${a.slot.x}%`;
-        const top  = `${a.slot.y}%`;
-        const label = p ? (p.giocatore.length>14 ? p.giocatore.slice(0,13)+'…' : p.giocatore) : '—';
-        const initials = p ? (p.giocatore.split(' ')[0]?.[0]||'') + (p.giocatore.split(' ')[1]?.[0]||'') : '-';
-        return (
-          <div key={`pos-${i}`} style={{left, top, transform:'translate(-50%,-50%)'}}
-               className="absolute text-center">
-            <div className={`mx-auto h-10 w-10 rounded-full flex items-center justify-center border shadow
-                             ${p ? 'bg-white text-gray-900' : 'bg-white/30 text-white'}`}>
-              <span className="text-[11px] font-semibold">{initials.toUpperCase()}</span>
+                  {/* giocatori */}
+                  {bestLineup && bestLineup.assigned.map((a,i)=>{
+                    const p = a.player;
+                    const left = `${a.slot.x}%`;
+                    const top  = `${a.slot.y}%`;
+                    const label = p ? (p.giocatore.length>14 ? p.giocatore.slice(0,13)+'…' : p.giocatore) : '—';
+                    const initials = p ? (p.giocatore.split(' ')[0]?.[0]||'') + (p.giocatore.split(' ')[1]?.[0]||'') : '-';
+                    return (
+                      <div key={`pos-${i}`} style={{left, top, transform:'translate(-50%,-50%)'}} className="absolute text-center">
+                        <div className={`mx-auto h-10 w-10 rounded-full flex items-center justify-center border shadow
+                                        ${p ? 'bg-white text-gray-900' : 'bg-white/30 text-white'}`}>
+                          <span className="text-[11px] font-semibold">{initials.toUpperCase()}</span>
+                        </div>
+                        <div className="mt-1 text-[11px] font-medium text-white drop-shadow">{label}</div>
+                        <div className="text-[10px] text-white/90">{p ? `${a.chosenRole} • FVM ${p._fvm.toFixed(0)}` : a.slot.label}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-            <div className="mt-1 text-[11px] font-medium text-white drop-shadow">{label}</div>
-            <div className="text-[10px] text-white/90">{p ? `${a.chosenRole} • FVM ${p._fvm.toFixed(0)}` : a.slot.label}</div>
-          </div>
-        );
-      })}
-    </div>
-  </div>
-</div>
 
             {/* riepilogo XI */}
             <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-gray-700">
@@ -833,7 +796,7 @@ useEffect(() => {
                   )}
                 </>
               ) : (
-                <span className="text-gray-600">Nessun giocatore in organico disponibile per calcolare l&apos;XI.</span>
+                <span className="text-gray-600">Nessun giocatore in organico disponibile per calcolare l’XI.</span>
               )}
             </div>
 
@@ -854,7 +817,7 @@ useEffect(() => {
         )}
         {/* ---------- fine XI ---------- */}
 
-        {/* Statistiche tabella */}
+        {/* Statistiche */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div className="bg-white rounded-lg shadow p-4">
             <div className="flex items-center justify-between">
@@ -900,7 +863,7 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* Tabella rosa */}
+        {/* Tabella Rosa */}
         <div className="bg-white rounded-lg shadow-lg overflow-hidden">
           <div className="px-6 py-4 bg-gradient-to-r from-green-600 to-green-700">
             <h2 className="text-xl font-semibold text-white">Rosa {selectedSquadra}</h2>
@@ -999,4 +962,5 @@ useEffect(() => {
     </div>
   );
 };
+
 export default FantacalcioManager;
