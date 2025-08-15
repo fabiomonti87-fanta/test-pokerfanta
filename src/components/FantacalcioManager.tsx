@@ -397,49 +397,50 @@ const FantacalcioManager: React.FC = () => {
                 <Home className="text-green-600" /> Home - Riepilogo Squadre
               </h1>
 
-              {/* Search + selettore squadra + pulsante Vai al dettaglio */}
-              <div className="flex w-full md:w-auto items-center gap-3">
-                {/* Search squadre */}
-                <div className="relative w-full md:w-80">
-                  <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-                  <input
-                    value={homeQuery}
-                    onChange={(e) => setHomeQuery(e.target.value)}
-                    placeholder="Cerca squadra…"
-                    className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  />
-                  {homeQuery && (
-                    <button
-                      onClick={() => setHomeQuery('')}
-                      className="absolute right-2 top-2 h-7 w-7 rounded-md hover:bg-gray-100 flex items-center justify-center"
-                      aria-label="Pulisci ricerca squadre"
-                    >
-                      <X className="h-4 w-4 text-gray-500" />
-                    </button>
-                  )}
-                </div>
+             {/* Search + selettore squadra + pulsante Vai al dettaglio */}
+<div className="flex flex-col md:flex-row w-full md:w-auto items-stretch md:items-center gap-3">
+  {/* Search squadre */}
+  <div className="relative w-full md:w-80">
+    <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+    <input
+      value={homeQuery}
+      onChange={(e) => setHomeQuery(e.target.value)}
+      placeholder="Cerca squadra…"
+      className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+    />
+    {homeQuery && (
+      <button
+        onClick={() => setHomeQuery('')}
+        className="absolute right-2 top-2 h-7 w-7 rounded-md hover:bg-gray-100 flex items-center justify-center"
+        aria-label="Pulisci ricerca squadre"
+      >
+        <X className="h-4 w-4 text-gray-500" />
+      </button>
+    )}
+  </div>
 
-                {/* Selettore + pulsante per entrare nel dettaglio */}
-                <div className="flex items-center gap-2">
-                  <select
-                    value={selectedSquadra}
-                    onChange={(e) => setSelectedSquadra(e.target.value)}
-                    className="px-3 py-2 border rounded-lg"
-                    aria-label="Seleziona squadra"
-                  >
-                    {squadre.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
+  {/* Selettore + pulsante per entrare nel dettaglio */}
+  <div className="flex items-center gap-2 w-full md:w-auto">
+    <select
+      value={selectedSquadra}
+      onChange={(e) => setSelectedSquadra(e.target.value)}
+      className="px-3 py-2 border rounded-lg w-full md:w-auto"
+      aria-label="Seleziona squadra"
+    >
+      {squadre.map((s) => (
+        <option key={s} value={s}>{s}</option>
+      ))}
+    </select>
 
-                  <button
-                    onClick={() => setCurrentView('squadra')}
-                    className="px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
-                  >
-                    Vai al dettaglio
-                  </button>
-                </div>
-              </div>
+    <button
+      onClick={() => setCurrentView('squadra')}
+      className="px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 whitespace-nowrap w-full md:w-auto"
+    >
+      Vai al dettaglio
+    </button>
+  </div>
+</div>
+
             </div>
           </div>
 
