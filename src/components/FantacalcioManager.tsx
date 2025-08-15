@@ -146,6 +146,7 @@ const FantacalcioManager: React.FC = () => {
     setFileLoaded(true); setLoading(false); setError(null);
   };
 
+  
   const processExcelData = (data: ArrayBuffer) => {
     try {
       const wb = XLSX.read(data, { type: 'array', cellStyles: true, cellFormulas: true, cellDates: true, cellNF: true, sheetStubs: true });
