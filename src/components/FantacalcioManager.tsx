@@ -1,75 +1,212 @@
 'use client';
-// src/components/FantacalcioManager.tsx
+
 import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Users, FileText, Calendar, ChevronDown, Upload, CheckCircle,
   CreditCard, TrendingUp, Home, Baby, X, Search, ChevronRight, Eye
 } from 'lucide-react';
+import { Roboto } from 'next/font/google';
 
-import {
-  useBestLineup, ROLE_OPTIONS, FormationKey, Player, Role,
-  getFVM as getFvmHook, parseRoles
-} from '../hooks/useBestLineup';
+// Font Google (render affidabile su Windows/iOS/Android)
+const roboto = Roboto({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '700'],
+});
 
-const ENABLE_STATS = false;
+// ========= Tipi =========
+type Role = 'Por' | 'Dc' | 'Dd' | 'Ds' | 'E' | 'M' | 'C' | 'T' | 'W' | 'A' | 'Pc';
+type FormationKey = '4-3-3' | '4-4-2' | '3-5-2' | '3-4-3' | '4-2-3-1';
 
-// compat opzionale per window.fs (auto-load)
-declare global {
-  interface Window {
-    fs?: { readFile: (name: string) => Promise<ArrayBuffer> }
-  }
+interface Player {
+  id?: number;
+  giocatore: string;
+  squadraFantacalcio: string;
+  squadraSerieA: string;
+  ruolo: string;
+  tipoContratto?: string;
+  dataAcquisto?: string;
+  scadenzaIpotizzata?: string;
+  tipoAcquisto?: string;
+  valAsteriscato?: string | number;
+  scambioIngaggio?: string | number;
+  valoreAcquisto?: string | number;
+  fvm2425?: string | number;
+  ultimoFVM?: string | number;
+  valoreXMercato?: string | number;
+  ingaggio36?: string | number;
+  ingaggioReale?: string | number;
 }
 
-/** TIPI ACQUISTO: file-level (evita warning deps) */
-const TIPI_ACQUISTO_DEFAULT = [
+interface Slot {
+  id: string;
+  label: string;
+  allowed: Role[];
+  x: number; // 0..100
+  y: number; // 0..100 (0 = alto, 100 = basso)
+}
+
+interface AssignedSlot {
+  slot: Slot;
+  player: (Player & { _roles: Role[]; _fvm: number }) | null;
+  chosenRole: Role | null;
+}
+
+// ========= Costanti & Normalizzazioni =========
+const ROLE_OPTIONS: Role[] = ['Por', 'Dc', 'Dd', 'Ds', 'E', 'M', 'C', 'T', 'W', 'A', 'Pc'];
+
+const ROLE_CANON: Record<string, Role> = {
+  POR: 'Por',
+  PC: 'Pc',
+  DC: 'Dc',
+  DD: 'Dd',
+  DS: 'Ds',
+  E: 'E',
+  M: 'M',
+  C: 'C',
+  T: 'T',
+  W: 'W',
+  A: 'A',
+};
+
+const FORMATION_KEYS: FormationKey[] = ['4-3-3', '4-4-2', '3-5-2', '3-4-3', '4-2-3-1'];
+
+const TIPI_ACQUISTO: ReadonlyArray<string> = [
   'Acquistato tit definitivo', 'Asta', 'Asta riparazione',
   'Ceduto in prestito', 'Vivaio', 'Promosso da vivaio'
 ] as const;
 
-/** moduli mostrati nel select (puoi ampliarla) */
-const FORMATION_KEYS: FormationKey[] = ['4-3-3','4-4-2','3-5-2','3-4-3','4-2-3-1'];
+const isValidDate = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '' && v !== '#N/A';
 
+// helper: distribuisce X in percentuale in modo uniforme
+const spreadX = (n: number): number[] => {
+  const xs: number[] = [];
+  for (let i = 1; i <= n; i++) xs.push((100 / (n + 1)) * i);
+  return xs;
+};
+
+// per ogni formazione, definiamo gli slot con ruoli ammessi (in ordine di preferenza)
+function buildSlotsForFormation(key: FormationKey): Slot[] {
+  const slots: Slot[] = [];
+
+  // GK (sempre)
+  slots.push({ id: 'GK', label: 'Por', allowed: ['Por'], x: 50, y: 90 });
+
+  const pushLine = (y: number, roleGroups: Role[][]) => {
+    const xs = spreadX(roleGroups.length);
+    roleGroups.forEach((allowed, i) => {
+      slots.push({
+        id: `L${y}-${i}`,
+        label: allowed.length === 1 ? allowed[0] : (allowed.join('/') as unknown as Role),
+        allowed,
+        x: xs[i],
+        y
+      });
+    });
+  };
+
+  // layout per linee (y dal basso verso l'alto)
+  switch (key) {
+    case '4-3-3': {
+      pushLine(72, [['Dd', 'Dc'], ['Dc'], ['Dc'], ['Ds', 'Dc']]);
+      pushLine(55, [['M', 'C', 'T', 'E'], ['M', 'C', 'T', 'E'], ['M', 'C', 'T', 'E']]);
+      pushLine(38, [['W', 'A'], ['Pc', 'A'], ['W', 'A']]);
+      break;
+    }
+    case '4-4-2': {
+      pushLine(72, [['Dd', 'Dc'], ['Dc'], ['Dc'], ['Ds', 'Dc']]);
+      pushLine(55, [['E', 'W', 'T'], ['M', 'C', 'T'], ['M', 'C', 'T'], ['E', 'W', 'T']]);
+      pushLine(38, [['Pc', 'A', 'W'], ['Pc', 'A', 'W']]);
+      break;
+    }
+    case '3-5-2': {
+      pushLine(72, [['Dc', 'Dd', 'Ds'], ['Dc'], ['Dc', 'Dd', 'Ds']]);
+      pushLine(57, [['E', 'W'], ['M', 'C', 'T'], ['M', 'C', 'T'], ['M', 'C', 'T'], ['E', 'W']]);
+      pushLine(38, [['Pc', 'A', 'W'], ['Pc', 'A', 'W']]);
+      break;
+    }
+    case '3-4-3': {
+      pushLine(72, [['Dc', 'Dd', 'Ds'], ['Dc'], ['Dc', 'Dd', 'Ds']]);
+      pushLine(55, [['E', 'W'], ['M', 'C', 'T'], ['M', 'C', 'T'], ['E', 'W']]);
+      pushLine(38, [['W', 'A'], ['Pc', 'A'], ['W', 'A']]);
+      break;
+    }
+    case '4-2-3-1': {
+      pushLine(72, [['Dd', 'Dc'], ['Dc'], ['Dc'], ['Ds', 'Dc']]);
+      pushLine(60, [['M', 'C'], ['M', 'C']]);
+      pushLine(48, [['W', 'E', 'T', 'A'], ['T', 'A', 'W'], ['W', 'E', 'T', 'A']]);
+      pushLine(36, [['Pc', 'A']]);
+      break;
+    }
+  }
+
+  return slots;
+}
+
+function parseRoles(ruolo: string | undefined | null): Role[] {
+  if (!ruolo || ruolo === '#N/A') return [];
+  const tokens = String(ruolo).split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const canon = tokens
+    .map(t => ROLE_CANON[t.toUpperCase()])
+    .filter(Boolean) as Role[];
+  return [...new Set(canon)];
+}
+
+function getFVM(p: Player): number {
+  const v1 = Number(p.valoreXMercato);
+  if (!Number.isNaN(v1) && v1 > 0) return v1;
+  const v2 = Number(p.ultimoFVM);
+  if (!Number.isNaN(v2) && v2 > 0) return v2;
+  const v3 = Number(p.fvm2425);
+  return Number.isNaN(v3) ? 0 : Math.max(0, v3);
+}
+
+// ========= Componente =========
 const FantacalcioManager: React.FC = () => {
   const [allData, setAllData] = useState<Player[]>([]);
   const [filteredData, setFilteredData] = useState<Player[]>([]);
   const [squadre, setSquadre] = useState<string[]>([]);
   const [creditiSquadre, setCreditiSquadre] = useState<Record<string, number>>({});
   const [selectedSquadra, setSelectedSquadra] = useState<string>('');
-  const [filterType, setFilterType] = useState<'tutti'|'scadenza'|'organico'|'riconferme'|'nonInListone'|'vivaio'>('tutti');
+  const [filterType, setFilterType] = useState<'tutti' | 'scadenza' | 'organico' | 'riconferme' | 'nonInListone' | 'vivaio'>('tutti');
   const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string|null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [fileLoaded, setFileLoaded] = useState<boolean>(false);
-  const [currentView, setCurrentView] = useState<'squadra'|'riepilogo'>('squadra');
+  const [currentView, setCurrentView] = useState<'squadra' | 'riepilogo'>('squadra');
 
-  // Ricerca & ruoli (OR)
+  // Ricerca e filtri
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedRoles, setSelectedRoles] = useState<Set<Role>>(new Set());
-
-  // Home search
   const [homeQuery, setHomeQuery] = useState<string>('');
 
-  // Formazione + Campo (nascosto di default)
-  const [formationChoice, setFormationChoice] = useState<'auto'|FormationKey>('auto');
+  // Formazione
+  const [formationChoice, setFormationChoice] = useState<'auto' | FormationKey>('auto');
   const [showPitch, setShowPitch] = useState<boolean>(false);
 
-  // Partite Serie A (widget Home)
-  const [matches, setMatches] = useState<
-    { utcDate: string; homeTeam: { name: string }; awayTeam: { name: string } }[]
-  >([]);
+  // Prossime partite Serie A (facoltativo: se non hai la rotta /api/sa-matches, rimane vuoto)
+  type MatchLite = {
+    utcDate: string;
+    homeTeam: { name: string };
+    awayTeam: { name: string };
+    competition?: { code?: string; name?: string };
+    score?: { fullTime?: { home: number | null; away: number | null } };
+  };
+  const [matches, setMatches] = useState<MatchLite[]>([]);
 
-  // Autoload locale (se presente window.fs)
+  // Auto-load se l’ambiente fornisce window.fs (es. demo locale)
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.fs?.readFile) {
+    if (typeof window !== 'undefined' && (window as unknown as { fs?: { readFile: (n: string) => Promise<ArrayBuffer> } }).fs?.readFile) {
       (async () => {
         try {
           setLoading(true);
           for (const name of ['GESTIONALE_UFFICIALE 2.xlsx', 'GESTIONALE_UFFICIALE 1.xlsx', 'GESTIONALE_UFFICIALE.xlsx']) {
             try {
-              const buf = await window.fs.readFile(name);
+              const buf = await (window as unknown as { fs: { readFile: (n: string) => Promise<ArrayBuffer> } }).fs.readFile(name);
               processExcelData(buf);
               return;
-            } catch { /* tenta il prossimo */ }
+            } catch {
+              /* tenta il prossimo file */
+            }
           }
           setLoading(false);
         } catch {
@@ -79,169 +216,170 @@ const FantacalcioManager: React.FC = () => {
     }
   }, []);
 
-  // Widget partite: fetch solo quando sei in Home
+  // Widget partite (safe: se fallisce, lascia lista vuota)
   useEffect(() => {
-    if (currentView !== 'riepilogo') return;
-    const d = new Date();
-    const df = d.toISOString().slice(0, 10);
-    const d2 = new Date(d.getTime() + 7 * 86400000).toISOString().slice(0, 10);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/sa-matches', { cache: 'no-store' });
+        if (!res.ok) return;
+        const json = (await res.json()) as { matches?: MatchLite[] };
+        if (!cancelled && json?.matches?.length) setMatches(json.matches);
+      } catch {
+        /* ignora */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
-    fetch(`/api/sa-matches?status=SCHEDULED&dateFrom=${df}&dateTo=${d2}`)
-      .then(r => r.json())
-      .then(j => setMatches(Array.isArray(j?.matches) ? j.matches.slice(0, 10) : []))
-      .catch(() => setMatches([]));
-  }, [currentView]);
-
-  const handleFileUpload: React.ChangeEventHandler<HTMLInputElement> = (e) => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setLoading(true); setError(null);
+    setLoading(true);
+    setError(null);
     const reader = new FileReader();
     reader.onload = ev => {
-      try { processExcelData(ev.target?.result as ArrayBuffer); }
-      catch { setError('Errore nel processamento del file.'); setLoading(false); }
+      try {
+        processExcelData(ev.target?.result as ArrayBuffer);
+      } catch {
+        setError('Errore nel processamento del file.');
+        setLoading(false);
+      }
     };
-    reader.onerror = () => { setError('Errore nella lettura del file.'); setLoading(false); };
+    reader.onerror = () => {
+      setError('Errore nella lettura del file.');
+      setLoading(false);
+    };
     reader.readAsArrayBuffer(file);
   };
 
   const loadDemoData = () => {
-    const demo: (string | number)[][] = [
-      [1,'Mario Rossi','Dinamo Splash','JUV','Pc','Diritto 2 anni','2024-09-01','2026-07-01','Asta','', '', 50, 18, 18, '', 120, 5.0, 3.0],
-      [2,'Luca Bianchi','Dinamo Splash','INT','W','Standard 1 anno','2024-09-01','2025-07-01','Acquistato tit definitivo','', '', 20, 12, 12, '', 30, 3.0, 2.0],
-      [3,'Gianni Verdi','Dinamo Splash','NAP','M','Diritto 1 anno','2024-09-01','2026-08-01','Asta riparazione','', '', 15, 10, 10, '', 60, 2.0, 1.5],
-      [7,'Nonno Gigi','Dinamo Splash','PAR','Por','Standard 2 anni','2024-09-01','2026-07-01','Asta','', '', 0, 0, 0, '', 0, 0.8, 0.4],
-      [9,'Terzino Destro','Dinamo Splash','SAM','Dd','-','2024-09-01','2027-07-01','Asta','', '', 0, 0, 0, '', 20, 1.5, 1.0],
-      [10,'Centrale 1','Dinamo Splash','LAZ','Dc','-','2024-09-01','2027-07-01','Asta','', '', 0, 0, 0, '', 25, 1.7, 1.2],
-      [11,'Centrale 2','Dinamo Splash','TOR','Dc','-','2024-09-01','2027-07-01','Asta','', '', 0, 0, 0, '', 24, 1.6, 1.1],
-      [12,'Terzino Sinistro','Dinamo Splash','SAS','Ds','-','2024-09-01','2027-07-01','Asta','', '', 0, 0, 0, '', 19, 1.4, 0.9],
-      [13,'Esterno','Dinamo Splash','FIO','E','-','2024-09-01','2027-07-01','Asta','', '', 0, 0, 0, '', 28, 1.8, 1.3],
-      [14,'Mezzala','Dinamo Splash','BOL','C','-','2024-09-01','2027-07-01','Asta','', '', 0, 0, 0, '', 26, 1.6, 1.2],
-      [15,'Trequartista','Dinamo Splash','ATA','T','-','2024-09-01','2027-07-01','Asta','', '', 0, 0, 0, '', 35, 2.0, 1.5],
-      [16,'Ala','Dinamo Splash','ROM','W','-','2024-09-01','2027-07-01','Asta','', '', 0, 0, 0, '', 34, 2.1, 1.5],
-      [17,'Seconda Punta','Dinamo Splash','NAP','A','-','2024-09-01','2027-07-01','Asta','', '', 0, 0, 0, '', 40, 2.4, 1.6],
+    const demo: Player[] = [
+      { id: 1, giocatore: 'Mario Rossi', squadraFantacalcio: 'Dinamo Splash', squadraSerieA: 'JUV', ruolo: 'Pc', tipoContratto: 'Diritto 2 anni', dataAcquisto: '2024-09-01', scadenzaIpotizzata: '2026-07-01', tipoAcquisto: 'Asta', valoreAcquisto: 50, fvm2425: 18, ultimoFVM: 18, valoreXMercato: 120, ingaggio36: 5.0, ingaggioReale: 3.0 },
+      { id: 2, giocatore: 'Luca Bianchi', squadraFantacalcio: 'Dinamo Splash', squadraSerieA: 'INT', ruolo: 'W', tipoContratto: 'Standard 1 anno', dataAcquisto: '2024-09-01', scadenzaIpotizzata: '2025-07-01', tipoAcquisto: 'Acquistato tit definitivo', valoreAcquisto: 20, fvm2425: 12, ultimoFVM: 12, valoreXMercato: 30, ingaggio36: 3.0, ingaggioReale: 2.0 },
+      { id: 3, giocatore: 'Gianni Verdi', squadraFantacalcio: 'Dinamo Splash', squadraSerieA: 'NAP', ruolo: 'M', tipoContratto: 'Diritto 1 anno', dataAcquisto: '2024-09-01', scadenzaIpotizzata: '2026-08-01', tipoAcquisto: 'Asta riparazione', valoreAcquisto: 15, fvm2425: 10, ultimoFVM: 10, valoreXMercato: 60, ingaggio36: 2.0, ingaggioReale: 1.5 },
+      { id: 7, giocatore: 'Nonno Gigi', squadraFantacalcio: 'Dinamo Splash', squadraSerieA: 'PAR', ruolo: 'Por', tipoContratto: 'Standard 2 anni', dataAcquisto: '2024-09-01', scadenzaIpotizzata: '2026-07-01', tipoAcquisto: 'Asta', valoreAcquisto: 0, fvm2425: 0, ultimoFVM: 0, valoreXMercato: 0, ingaggio36: 0.8, ingaggioReale: 0.4 },
+      { id: 9, giocatore: 'Terzino Destro', squadraFantacalcio: 'Dinamo Splash', squadraSerieA: 'SAM', ruolo: 'Dd', dataAcquisto: '2024-09-01', scadenzaIpotizzata: '2027-07-01', tipoAcquisto: 'Asta', valoreAcquisto: 0, fvm2425: 0, ultimoFVM: 0, valoreXMercato: 20, ingaggio36: 1.5, ingaggioReale: 1.0 },
+      { id: 10, giocatore: 'Centrale 1', squadraFantacalcio: 'Dinamo Splash', squadraSerieA: 'LAZ', ruolo: 'Dc', dataAcquisto: '2024-09-01', scadenzaIpotizzata: '2027-07-01', tipoAcquisto: 'Asta', valoreAcquisto: 0, fvm2425: 0, ultimoFVM: 0, valoreXMercato: 25, ingaggio36: 1.7, ingaggioReale: 1.2 },
+      { id: 11, giocatore: 'Centrale 2', squadraFantacalcio: 'Dinamo Splash', squadraSerieA: 'TOR', ruolo: 'Dc', dataAcquisto: '2024-09-01', scadenzaIpotizzata: '2027-07-01', tipoAcquisto: 'Asta', valoreAcquisto: 0, fvm2425: 0, ultimoFVM: 0, valoreXMercato: 24, ingaggio36: 1.6, ingaggioReale: 1.1 },
+      { id: 12, giocatore: 'Terzino Sinistro', squadraFantacalcio: 'Dinamo Splash', squadraSerieA: 'SAS', ruolo: 'Ds', dataAcquisto: '2024-09-01', scadenzaIpotizzata: '2027-07-01', tipoAcquisto: 'Asta', valoreAcquisto: 0, fvm2425: 0, ultimoFVM: 0, valoreXMercato: 19, ingaggio36: 1.4, ingaggioReale: 0.9 },
+      { id: 13, giocatore: 'Esterno', squadraFantacalcio: 'Dinamo Splash', squadraSerieA: 'FIO', ruolo: 'E', dataAcquisto: '2024-09-01', scadenzaIpotizzata: '2027-07-01', tipoAcquisto: 'Asta', valoreAcquisto: 0, fvm2425: 0, ultimoFVM: 0, valoreXMercato: 28, ingaggio36: 1.8, ingaggioReale: 1.3 },
+      { id: 14, giocatore: 'Mezzala', squadraFantacalcio: 'Dinamo Splash', squadraSerieA: 'BOL', ruolo: 'C', dataAcquisto: '2024-09-01', scadenzaIpotizzata: '2027-07-01', tipoAcquisto: 'Asta', valoreAcquisto: 0, fvm2425: 0, ultimoFVM: 0, valoreXMercato: 26, ingaggio36: 1.6, ingaggioReale: 1.2 },
+      { id: 15, giocatore: 'Trequartista', squadraFantacalcio: 'Dinamo Splash', squadraSerieA: 'ATA', ruolo: 'T', dataAcquisto: '2024-09-01', scadenzaIpotizzata: '2027-07-01', tipoAcquisto: 'Asta', valoreAcquisto: 0, fvm2425: 0, ultimoFVM: 0, valoreXMercato: 35, ingaggio36: 2.0, ingaggioReale: 1.5 },
+      { id: 16, giocatore: 'Ala', squadraFantacalcio: 'Dinamo Splash', squadraSerieA: 'ROM', ruolo: 'W', dataAcquisto: '2024-09-01', scadenzaIpotizzata: '2027-07-01', tipoAcquisto: 'Asta', valoreAcquisto: 0, fvm2425: 0, ultimoFVM: 0, valoreXMercato: 34, ingaggio36: 2.1, ingaggioReale: 1.5 },
+      { id: 17, giocatore: 'Seconda Punta', squadraFantacalcio: 'Dinamo Splash', squadraSerieA: 'NAP', ruolo: 'A', dataAcquisto: '2024-09-01', scadenzaIpotizzata: '2027-07-01', tipoAcquisto: 'Asta', valoreAcquisto: 0, fvm2425: 0, ultimoFVM: 0, valoreXMercato: 40, ingaggio36: 2.4, ingaggioReale: 1.6 },
     ];
-    const processed: Player[] = demo.map(row => ({
-      id: row[0] as number,
-      giocatore: row[1] as string,
-      squadraFantacalcio: row[2] as string,
-      squadraSerieA: row[3] as string,
-      ruolo: row[4] as string,
-      tipoContratto: row[5] as string,
-      dataAcquisto: row[6] as string,
-      scadenzaIpotizzata: row[7] as string,
-      tipoAcquisto: row[8] as string,
-      valAsteriscato: row[9] as string,
-      scambioIngaggio: row[10] as string,
-      valoreAcquisto: row[11] as number,
-      fvm2425: row[12] as number,
-      ultimoFVM: row[13] as number,
-      valoreXMercato: row[15] as number,
-      ingaggio36: row[16] as number,
-      ingaggioReale: row[17] as number
-    }));
-    setAllData(processed);
-    const uniq = [...new Set(processed.map(p => p.squadraFantacalcio))].sort();
+    setAllData(demo);
+    const uniq = [...new Set(demo.map(p => p.squadraFantacalcio))].sort();
     setSquadre(uniq);
     setSelectedSquadra(uniq[0] || '');
     setCreditiSquadre({ 'Dinamo Splash': 100 });
-    setFileLoaded(true); setLoading(false); setError(null);
+    setFileLoaded(true);
+    setLoading(false);
+    setError(null);
   };
 
-  
   const processExcelData = (data: ArrayBuffer) => {
     try {
-      const wb = XLSX.read(data, { type: 'array', cellStyles: true, cellFormulas: true, cellDates: true, cellNF: true, sheetStubs: true });
-      if (!wb.Sheets['Gestionale']) { setError('Il file non contiene il foglio &quot;Gestionale&quot;.'); setLoading(false); return; }
-      const raw = XLSX.utils.sheet_to_json(wb.Sheets['Gestionale'], { header: 1 }) as unknown[][];
+      const wb = XLSX.read(data, {
+        type: 'array', cellStyles: true, cellFormulas: true, cellDates: true, cellNF: true, sheetStubs: true
+      });
+      const gestionale = wb.Sheets['Gestionale'];
+      if (!gestionale) { setError('Il file non contiene il foglio &quot;Gestionale&quot;.'); setLoading(false); return; }
+
+      const raw = XLSX.utils.sheet_to_json(gestionale, { header: 1 }) as unknown[][];
       const rows: Player[] = [];
       for (let i = 1; i < raw.length; i++) {
-        const r = raw[i] as unknown[];
+        const r = raw[i];
         if (r && r[1] && r[1] !== '#N/A') {
           rows.push({
-            id: r[0] as number,
-            giocatore: r[1] as string,
-            squadraFantacalcio: r[2] as string,
-            squadraSerieA: r[3] as string,
-            ruolo: r[4] as string,
-            tipoContratto: r[5] as string,
-            dataAcquisto: r[6] as string,
-            scadenzaIpotizzata: r[7] as string,
-            tipoAcquisto: r[8] as string,
-            valAsteriscato: r[9] as string,
-            scambioIngaggio: r[10] as string,
-            valoreAcquisto: r[11] as number,
-            fvm2425: r[12] as number,
-            ultimoFVM: r[13] as number,
-            valoreXMercato: r[15] as number,
-            ingaggio36: r[16] as number,
-            ingaggioReale: r[17] as number
+            id: Number(r[0]),
+            giocatore: String(r[1]),
+            squadraFantacalcio: String(r[2] ?? ''),
+            squadraSerieA: String(r[3] ?? ''),
+            ruolo: String(r[4] ?? ''),
+            tipoContratto: r[5] ? String(r[5]) : undefined,
+            dataAcquisto: r[6] ? String(r[6]) : undefined,
+            scadenzaIpotizzata: r[7] ? String(r[7]) : undefined,
+            tipoAcquisto: r[8] ? String(r[8]) : undefined,
+            valAsteriscato: r[9] as string | number | undefined,
+            scambioIngaggio: r[10] as string | number | undefined,
+            valoreAcquisto: r[11] as string | number | undefined,
+            fvm2425: r[12] as string | number | undefined,
+            ultimoFVM: r[13] as string | number | undefined,
+            valoreXMercato: r[15] as string | number | undefined,
+            ingaggio36: r[16] as string | number | undefined,
+            ingaggioReale: r[17] as string | number | undefined,
           });
         }
       }
       if (!rows.length) { setError('Nessun dato valido trovato nel file.'); setLoading(false); return; }
       setAllData(rows);
 
-      const uniq = [...new Set(rows.map(p => p.squadraFantacalcio).filter(s => s && s !== '#N/A'))].sort() as string[];
+      const uniq = [...new Set(rows.map(p => p.squadraFantacalcio).filter(s => s && s !== '#N/A'))].sort();
       setSquadre(uniq);
 
-      if (wb.Sheets['Sintesi Squadre']) {
-        const sintesi = XLSX.utils.sheet_to_json(wb.Sheets['Sintesi Squadre'], { header: 1 }) as unknown[][];
+      const sintesi = wb.Sheets['Sintesi Squadre'];
+      if (sintesi) {
+        const ss = XLSX.utils.sheet_to_json(sintesi, { header: 1 }) as unknown[][];
         const cred: Record<string, number> = {};
-        for (let i = 18; i < sintesi.length; i++) {
-          const r = sintesi[i] as unknown[];
-          if (r && r[0]) cred[r[0] as string] = parseFloat(String(r[1])) || 0;
+        for (let i = 18; i < ss.length; i++) {
+          const r = ss[i];
+          if (r && r[0]) cred[String(r[0])] = Number(r[1]) || 0;
         }
         setCreditiSquadre(cred);
       }
 
       if (uniq.length) setSelectedSquadra(uniq[0]);
-      setFileLoaded(true); setLoading(false);
+      setFileLoaded(true);
+      setLoading(false);
     } catch {
-      setError('Errore nel processamento del file.'); setLoading(false);
+      setError('Errore nel processamento del file.');
+      setLoading(false);
     }
   };
 
-  // Helpers
-  const formatDate = (v?: string | Date) => {
-    if (!v || v === '#N/A') return '-';
-    try { return new Date(v).toLocaleDateString('it-IT'); } catch { return '-'; }
+  // Helpers UI
+  const formatDate = (v: unknown) => {
+    if (!isValidDate(v)) return '-';
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString('it-IT');
   };
-  const formatRuolo = (v?: string) => (!v || v === '#N/A') ? '-' : v;
-  const formatFVM = (v?: string | number) => (!v || v === '#N/A') ? '-' : v;
-  const formatIngaggio = (v?: string | number) => {
+  const formatRuolo = (v: unknown) => (!v || v === '#N/A') ? '-' : String(v);
+  const formatFVM = (v: unknown) => (!v || v === '#N/A') ? '-' : String(v);
+  const formatIngaggio = (v: unknown) => {
     if (!v || v === '#N/A') return '-';
-    const n = parseFloat(String(v)); return isNaN(n) ? '-' : n.toFixed(1);
+    const n = Number(v);
+    return Number.isNaN(n) ? '-' : n.toFixed(1);
   };
 
-  // Calcoli Home
-  const calculateValoreInScadenza = (squadra: string) => allData
+  // Calcoli riepilogo
+  const calculateValoreInScadenza = (squadra: string): number => allData
     .filter(p => p.squadraFantacalcio === squadra
-      && TIPI_ACQUISTO_DEFAULT.includes(p.tipoAcquisto as (typeof TIPI_ACQUISTO_DEFAULT)[number])
-      && p.scadenzaIpotizzata && p.scadenzaIpotizzata !== '#N/A'
-      && new Date(p.scadenzaIpotizzata).getDate() === 1
-      && new Date(p.scadenzaIpotizzata).getMonth() === 6
-      && new Date(p.scadenzaIpotizzata).getFullYear() === 2025)
-    .reduce((s, p) => s + (parseFloat(String(p.valoreXMercato)) || 0), 0);
+      && TIPI_ACQUISTO.includes(String(p.tipoAcquisto || ''))
+      && isValidDate(p.scadenzaIpotizzata)
+      && new Date(String(p.scadenzaIpotizzata)).getDate() === 1
+      && new Date(String(p.scadenzaIpotizzata)).getMonth() === 6
+      && new Date(String(p.scadenzaIpotizzata)).getFullYear() === 2025)
+    .reduce((s, p) => s + (Number(p.valoreXMercato) || 0), 0);
 
-  const calculatePossibiliCrediti = (squadra: string) =>
+  const calculatePossibiliCrediti = (squadra: string): number =>
     (creditiSquadre[squadra] || 0) + calculateValoreInScadenza(squadra);
 
-  const calculateTotaleIngaggi = (squadra: string) => allData
-    .filter(p => p.squadraFantacalcio === squadra
-      && TIPI_ACQUISTO_DEFAULT.includes(p.tipoAcquisto as (typeof TIPI_ACQUISTO_DEFAULT)[number]))
-    .reduce((s, p) => s + (parseFloat(String(p.ingaggioReale)) || 0), 0);
+  const calculateTotaleIngaggi = (squadra: string): number => allData
+    .filter(p => p.squadraFantacalcio === squadra && TIPI_ACQUISTO.includes(String(p.tipoAcquisto || '')))
+    .reduce((s, p) => s + (Number(p.ingaggioReale) || 0), 0);
 
-  const calculateContrattiPluriennali = (squadra: string) => allData
+  const calculateContrattiPluriennali = (squadra: string): number => allData
     .filter(p => {
       if (p.squadraFantacalcio !== squadra) return false;
-      const organico = TIPI_ACQUISTO_DEFAULT.filter(t => t !== 'Vivaio');
-      if (!organico.includes(p.tipoAcquisto as (typeof TIPI_ACQUISTO_DEFAULT)[number])) return false;
-      if (!p.scadenzaIpotizzata || p.scadenzaIpotizzata === '#N/A') return false;
-      const scad = new Date(p.scadenzaIpotizzata);
+      const organico = TIPI_ACQUISTO.filter(t => t !== 'Vivaio');
+      if (!organico.includes(String(p.tipoAcquisto || ''))) return false;
+      if (!isValidDate(p.scadenzaIpotizzata)) return false;
+      const scad = new Date(String(p.scadenzaIpotizzata));
       if (!(scad > new Date('2025-07-01'))) return false;
       const hasFVM = p.ultimoFVM && p.ultimoFVM !== '#N/A' && p.ultimoFVM !== '#N/D' && p.ultimoFVM !== '';
-      return !!hasFVM;
+      return Boolean(hasFVM);
     }).length;
 
   // Filtri principali + ricerca + ruoli (OR)
@@ -254,17 +392,18 @@ const FantacalcioManager: React.FC = () => {
       if (filterType === 'vivaio' && !(p.tipoAcquisto === 'Vivaio' || p.tipoAcquisto === 'Promosso da vivaio')) return false;
 
       const tipi = filterType === 'organico'
-        ? (TIPI_ACQUISTO_DEFAULT.filter(t => t !== 'Vivaio') as readonly string[])
-        : (TIPI_ACQUISTO_DEFAULT as readonly string[]);
-      if (!tipi.includes(String(p.tipoAcquisto))) return false;
+        ? TIPI_ACQUISTO.filter(t => t !== 'Vivaio')
+        : TIPI_ACQUISTO;
+
+      if (!tipi.includes(String(p.tipoAcquisto || ''))) return false;
 
       if (filterType === 'nonInListone') {
         const noList = !p.ultimoFVM || p.ultimoFVM === '#N/A' || p.ultimoFVM === '#N/D' || p.ultimoFVM === '';
         if (!noList) return false;
       }
 
-      if (p.scadenzaIpotizzata && p.scadenzaIpotizzata !== '#N/A') {
-        const scad = new Date(p.scadenzaIpotizzata);
+      if (isValidDate(p.scadenzaIpotizzata)) {
+        const scad = new Date(String(p.scadenzaIpotizzata));
         const isScad2025 = scad.getDate() === 1 && scad.getMonth() === 6 && scad.getFullYear() === 2025;
         const dopo = scad > new Date('2025-07-01');
         if (filterType === 'scadenza' && !isScad2025) return false;
@@ -294,6 +433,7 @@ const FantacalcioManager: React.FC = () => {
     setFilteredData(res);
   }, [selectedSquadra, filterType, allData, normalizedQuery, selectedRoles]);
 
+  const clearSearchAndRoles = () => { setSearchQuery(''); setSelectedRoles(new Set<Role>()); };
   const toggleRole = (r: Role) => setSelectedRoles(prev => {
     const n = new Set(prev); n.has(r) ? n.delete(r) : n.add(r); return n;
   });
@@ -305,75 +445,82 @@ const FantacalcioManager: React.FC = () => {
     return squadre.filter(s => s.toLowerCase().includes(q));
   }, [homeQuery, squadre]);
 
-  // Organico per XI: scadenza > 01/07/2025, esclusi Vivaio/Promosso, FVM valido
+  // ---------- Calcolo XI migliore ----------
   const organicoPlayers = useMemo(() => {
-    if (!selectedSquadra) return [] as Player[];
+    if (!selectedSquadra) return [] as (Player & { _roles: Role[]; _fvm: number })[];
     return allData
       .filter(p => p.squadraFantacalcio === selectedSquadra)
       .filter(p => {
-        const organicoTypes = TIPI_ACQUISTO_DEFAULT.filter(t => t !== 'Vivaio');
-        if (!organicoTypes.includes(p.tipoAcquisto as (typeof TIPI_ACQUISTO_DEFAULT)[number])) return false;
-        if (!p.scadenzaIpotizzata || p.scadenzaIpotizzata === '#N/A') return false;
-        const scad = new Date(p.scadenzaIpotizzata);
+        const organicoTypes = TIPI_ACQUISTO.filter(t => t !== 'Vivaio');
+        if (!organicoTypes.includes(String(p.tipoAcquisto || ''))) return false;
+        if (!isValidDate(p.scadenzaIpotizzata)) return false;
+        const scad = new Date(String(p.scadenzaIpotizzata));
         if (!(scad > new Date('2025-07-01'))) return false;
-        return getFvmHook(p) > 0;
-      });
+        return getFVM(p) > 0;
+      })
+      .map(p => ({ ...p, _roles: parseRoles(p.ruolo), _fvm: getFVM(p) }))
+      .sort((a, b) => b._fvm - a._fvm);
   }, [allData, selectedSquadra]);
 
-  const bestLineup = useBestLineup(organicoPlayers, formationChoice);
-
-  // --- STATISTICHE GIOCATORE (modal) ---
-const [playerModalOpen, setPlayerModalOpen] = useState(false);
-const [playerLoading, setPlayerLoading] = useState(false);
-const [playerError, setPlayerError] = useState<string | null>(null);
-const [playerStats, setPlayerStats] = useState<null | {
-  team: { id: number; name: string; tla?: string };
-  player: { id: number; name: string };
-  season: string;
-  range: { dateFrom: string; dateTo: string };
-  aggregations: {
-    matchesOnPitch?: number;
-    startingXI?: number;
-    minutesPlayed?: number;
-    goals?: number;
-    assists?: number;
-    yellowCards?: number;
-    yellowRedCards?: number;
-    redCards?: number;
-    subbedOut?: number;
-    subbedIn?: number;
+  const assignLineupGreedy = (slots: Slot, players: (Player & { _roles: Role[]; _fvm: number })[]) => {
+    // Questa definizione è solo per firma; usiamo quella sotto che lavora su array
+    return [] as AssignedSlot[];
   };
-  recentMatches: Array<{
-    utcDate: string;
-    competition: { code: string; name: string };
-    homeTeam: { name: string };
-    awayTeam: { name: string };
-    score: { fullTime: { home: number | null; away: number | null } };
-  }>;
-}>(null);
 
-async function openPlayerStats(name: string, tla: string) {
-  try {
-    setPlayerError(null);
-    setPlayerLoading(true);
-    setPlayerModalOpen(true);
-    const res = await fetch(`/api/player-stats?name=${encodeURIComponent(name)}&tla=${encodeURIComponent(tla)}`);
-    const json = await res.json();
-    if (!res.ok) throw new Error(json?.error || 'Errore sconosciuto');
-    setPlayerStats(json);
-  } catch (e: any) {
-    setPlayerStats(null);
-    setPlayerError(e?.message || 'Errore');
-  } finally {
-    setPlayerLoading(false);
+  // greedy “scarcity first”: per ogni slot (ordinati per pochi eleggibili), assegna il miglior FVM disponibile
+  function assignLineup(slots: Slot[], players: (Player & { _roles: Role[]; _fvm: number })[]): AssignedSlot[] {
+    const assigned: (AssignedSlot | undefined)[] = [];
+    const used = new Set<number | undefined>();
+    const elig = slots.map((s, idx) => {
+      const list = players.filter(p => !used.has(p.id) && p._roles.some(r => s.allowed.includes(r as Role)))
+        .sort((a, b) => b._fvm - a._fvm);
+      return { idx, slot: s, list };
+    });
+    // ordina per scarsità
+    elig.sort((a, b) => a.list.length - b.list.length);
+
+    for (const e of elig) {
+      const candidate = e.list.find(p => !used.has(p.id));
+      if (candidate) {
+        used.add(candidate.id);
+        const chosenRole = e.slot.allowed.find(r => candidate._roles.includes(r as Role)) || e.slot.allowed[0];
+        assigned[e.idx] = { slot: e.slot, player: candidate, chosenRole };
+      } else {
+        assigned[e.idx] = { slot: e.slot, player: null, chosenRole: null };
+      }
+    }
+    return assigned.map((a, i) => a ?? { slot: slots[i], player: null, chosenRole: null });
   }
-}
 
-  // ------------------- RENDER -------------------
+  function evaluateFormation(key: FormationKey) {
+    const slots = buildSlotsForFormation(key);
+    const assigned = assignLineup(slots, organicoPlayers);
+    const filled = assigned.filter(a => !!a.player).length;
+    const sumFvm = assigned.reduce((s, a) => s + (a.player ? a.player._fvm : 0), 0);
+    const bench = organicoPlayers.filter(p => !assigned.some(a => a.player && a.player.id === p.id));
+    return { key, slots, assigned, filled, sumFvm, bench };
+  }
+
+  const bestLineup = useMemo(() => {
+    if (!organicoPlayers.length) return null as null | ReturnType<typeof evaluateFormation>;
+    const keys = formationChoice === 'auto' ? FORMATION_KEYS : [formationChoice];
+    let best: ReturnType<typeof evaluateFormation> | null = null;
+    for (const k of keys) {
+      const ev = evaluateFormation(k);
+      if (!best) best = ev;
+      else {
+        if (ev.filled > best.filled) best = ev;
+        else if (ev.filled === best.filled && ev.sumFvm > best.sumFvm) best = ev;
+      }
+    }
+    return best;
+  }, [organicoPlayers, formationChoice]);
+
+  // ======= UI =======
 
   if (!fileLoaded) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center p-3">
+      <div className={`${roboto.className} min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center p-3`}>
         <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
           <div className="text-center">
             <div className="mx-auto w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-3">
@@ -385,7 +532,7 @@ async function openPlayerStats(name: string, tla: string) {
             {loading ? (
               <div className="text-center">
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-green-600 mx-auto mb-3"></div>
-                <p className="text-gray-600 text-sm">Elaborazione del file in corso...</p>
+                <p className="text-gray-600 text-sm">Elaborazione del file in corso…</p>
               </div>
             ) : (
               <>
@@ -426,10 +573,10 @@ async function openPlayerStats(name: string, tla: string) {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center">
+      <div className={`${roboto.className} min-h-screen bg-gradient-to-br from-green-50 to-blue-50 flex items-center justify-center`}>
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Caricamento dati...</p>
+          <p className="text-gray-600">Caricamento dati…</p>
         </div>
       </div>
     );
@@ -438,7 +585,7 @@ async function openPlayerStats(name: string, tla: string) {
   // ===== HOME =====
   if (currentView === 'riepilogo') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-3 md:p-4">
+      <div className={`${roboto.className} min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-3 md:p-4`}>
         <div className="max-w-5xl mx-auto">
           {/* Header Home */}
           <div className="bg-white rounded-xl shadow-lg p-4 md:p-6 mb-4">
@@ -447,50 +594,50 @@ async function openPlayerStats(name: string, tla: string) {
                 <Home className="text-green-600" /> Home - Riepilogo Squadre
               </h1>
 
-             {/* Search + selettore squadra + pulsante Vai al dettaglio */}
-<div className="flex flex-col md:flex-row w-full md:w-auto items-stretch md:items-center gap-3">
-  {/* Search squadre */}
-  <div className="relative w-full md:w-80">
-    <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-    <input
-      value={homeQuery}
-      onChange={(e) => setHomeQuery(e.target.value)}
-      placeholder="Cerca squadra…"
-      className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-    />
-    {homeQuery && (
-      <button
-        onClick={() => setHomeQuery('')}
-        className="absolute right-2 top-2 h-7 w-7 rounded-md hover:bg-gray-100 flex items-center justify-center"
-        aria-label="Pulisci ricerca squadre"
-      >
-        <X className="h-4 w-4 text-gray-500" />
-      </button>
-    )}
-  </div>
+              {/* Search + selettore squadra + pulsante Vai al dettaglio */}
+              <div className="flex flex-col md:flex-row w-full md:w-auto items-stretch md:items-center gap-3">
+                {/* Search squadre */}
+                <div className="relative w-full md:w-80">
+                  <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+                  <input
+                    value={homeQuery}
+                    onChange={(e) => setHomeQuery(e.target.value)}
+                    placeholder="Cerca squadra…"
+                    className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  />
+                  {homeQuery && (
+                    <button
+                      onClick={() => setHomeQuery('')}
+                      className="absolute right-2 top-2 h-7 w-7 rounded-md hover:bg-gray-100 flex items-center justify-center"
+                      aria-label="Pulisci ricerca squadre"
+                    >
+                      <X className="h-4 w-4 text-gray-500" />
+                    </button>
+                  )}
+                </div>
 
-  {/* Selettore + pulsante per entrare nel dettaglio */}
-  <div className="flex items-center gap-2 w-full md:w-auto">
-    <select
-      value={selectedSquadra}
-      onChange={(e) => setSelectedSquadra(e.target.value)}
-      className="px-3 py-2 border rounded-lg w-full md:w-auto"
-      aria-label="Seleziona squadra"
-    >
-      {squadre.map((s) => (
-        <option key={s} value={s}>{s}</option>
-      ))}
-    </select>
+                {/* Selettore + pulsante per entrare nel dettaglio */}
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                  <select
+                    value={selectedSquadra}
+                    onChange={(e) => setSelectedSquadra(e.target.value)}
+                    className="px-3 py-2 border rounded-lg w-full md:w-auto"
+                    aria-label="Seleziona squadra"
+                  >
+                    {squadre.map((s) => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
 
-    <button
-      onClick={() => setCurrentView('squadra')}
-      className="px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 whitespace-nowrap w-full md:w-auto"
-    >
-      Vai al dettaglio
-    </button>
-  </div>
-</div>
-
+                  <button
+                    onClick={() => setCurrentView('squadra')}
+                    disabled={!selectedSquadra}
+                    className={`px-3 py-2 rounded-lg text-white ${selectedSquadra ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-300 cursor-not-allowed'}`}
+                  >
+                    Vai al dettaglio
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -592,7 +739,7 @@ async function openPlayerStats(name: string, tla: string) {
 
   // ===== DETTAGLIO =====
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-4">
+    <div className={`${roboto.className} min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-4`}>
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
@@ -685,14 +832,14 @@ async function openPlayerStats(name: string, tla: string) {
                     onClick={() => setFilterType(key as typeof filterType)}
                     className={`px-3 py-2 rounded-lg font-medium text-sm transition-colors ${filterType === key ? `${cls} text-white` : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                   >
-                    {label}
+                    {label as React.ReactNode}
                   </button>
                 ))}
               </div>
             </div>
           </div>
 
-          {/* Search + Toggle ruoli + Bottone mostra campo */}
+          {/* Search nella rosa + Toggle ruoli */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
             {/* Search */}
             <div className="md:col-span-2">
@@ -723,12 +870,12 @@ async function openPlayerStats(name: string, tla: string) {
               <label className="block text-sm font-medium text-gray-700 mb-2">Filtra per ruolo (OR)</label>
               <div className="flex flex-wrap gap-2">
                 {ROLE_OPTIONS.map(r => {
-                  const active = selectedRoles.has(r as Role);
+                  const active = selectedRoles.has(r);
                   return (
                     <button
                       key={r}
                       type="button"
-                      onClick={() => toggleRole(r as Role)}
+                      onClick={() => toggleRole(r)}
                       aria-pressed={active}
                       className={`px-3 py-1.5 rounded-full text-sm font-medium border transition ${
                         active ? 'bg-green-600 text-white border-green-600' : 'bg-gray-50 text-gray-700 border-gray-300 hover:bg-gray-100'
@@ -741,7 +888,7 @@ async function openPlayerStats(name: string, tla: string) {
                 {selectedRoles.size > 0 && (
                   <button
                     type="button"
-                    onClick={() => setSelectedRoles(new Set())}
+                    onClick={() => setSelectedRoles(new Set<Role>())}
                     className="px-3 py-1.5 rounded-full text-sm font-medium border bg-white text-gray-700 hover:bg-gray-50"
                   >
                     Azzera
@@ -750,125 +897,131 @@ async function openPlayerStats(name: string, tla: string) {
               </div>
             </div>
           </div>
-
-          {/* Bottone per mostrare/nascondere il campo */}
-          <div className="mt-4">
-            <button
-              onClick={() => setShowPitch(v => !v)}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
-            >
-              <Eye className="h-4 w-4" />
-              {showPitch ? 'Nascondi campo' : 'Oggi giocherebbero così'}
-            </button>
-          </div>
         </div>
 
-        {/* ---------- BLOCCO XI (visibile solo dopo click) ---------- */}
-        {showPitch && (
-          <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
-              <div>
-                <h3 className="text-xl font-semibold text-gray-900">Oggi giocherebbero così</h3>
-                <p className="text-sm text-gray-500">Scelta basata sull’organico (scadenza &gt; 01/07/2025) e FVM più alto, nel rispetto dei ruoli Mantra.</p>
-              </div>
+        {/* ---------- BLOCCO: Oggi giocherebbero così ---------- */}
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+            <div>
+              <h3 className="text-xl font-semibold text-gray-900">Oggi giocherebbero così</h3>
+              <p className="text-sm text-gray-500">Calcolo su organico (scadenza &gt; 01/07/2025) e FVM più alto, rispettando i ruoli Mantra.</p>
+            </div>
+            <div className="flex gap-2 items-end">
               <div className="w-full md:w-64">
                 <label className="block text-sm font-medium text-gray-700 mb-1">Formazione</label>
                 <select
                   value={formationChoice}
-                  onChange={(e) => setFormationChoice(e.target.value as typeof formationChoice)}
+                  onChange={(e) => setFormationChoice(e.target.value as 'auto' | FormationKey)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent bg-white"
                 >
                   <option value="auto">Selezione automatica (migliore)</option>
                   {FORMATION_KEYS.map(k => <option key={k} value={k}>{k}</option>)}
                 </select>
               </div>
+              <button
+                onClick={() => setShowPitch(v => !v)}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                title="Mostra/Nascondi campo"
+              >
+                <Eye className="h-4 w-4" />
+                {showPitch ? 'Nascondi campo' : 'Oggi giocherebbero così'}
+              </button>
             </div>
+          </div>
 
-            {/* Campo stilizzato (SVG) */}
+          {/* Campo stilizzato (mostra solo se attivato) */}
+          {showPitch && (
             <div className="mt-4 overflow-x-auto">
-              <div className="min-w-[700px]">
-                <div className="relative w-full rounded-xl border bg-emerald-900/10" style={{paddingTop:'60%'}}>
-                  <svg viewBox="0 0 105 68" className="absolute inset-0 w-full h-full">
-                    <defs>
-                      <pattern id="grass" width="4" height="4" patternUnits="userSpaceOnUse">
-                        <rect width="4" height="4" fill="#127a39"/>
-                        <rect width="4" height="2" fill="#0f6a32"/>
-                      </pattern>
-                    </defs>
-                    <rect x="1.5" y="1.5" width="102" height="65" rx="2" fill="url(#grass)" stroke="#ffffff" strokeWidth="1.5"/>
-                    <line x1="52.5" y1="1.5" x2="52.5" y2="66.5" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
-                    <circle cx="52.5" cy="34" r="9" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
-                    {/* area alto */}
-                    <rect x="24" y="1.5" width="57" height="12" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
-                    <rect x="34.5" y="1.5" width="36" height="4.5" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
-                    {/* area basso */}
-                    <rect x="24" y="54.5" width="57" height="12" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
-                    <rect x="34.5" y="62" width="36" height="4.5" fill="none" stroke="#fff" strokeOpacity=".7" strokeWidth="0.6"/>
-                    <circle cx="52.5" cy="11" r="0.8" fill="#fff"/>
-                    <circle cx="52.5" cy="57" r="0.8" fill="#fff"/>
-                  </svg>
+              <div className="min-w-[640px]">
+                <div
+                  className="relative w-full rounded-xl border"
+                  style={{
+                    paddingTop: '62%', // aspect ratio
+                    background:
+                      'linear-gradient(180deg, rgba(11,94,38,0.95), rgba(11,94,38,0.95)), repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0, rgba(255,255,255,0.05) 6%, rgba(255,255,255,0.02) 6%, rgba(255,255,255,0.02) 12%)',
+                    boxShadow: 'inset 0 0 0 3px #fff, inset 0 0 0 6px rgba(255,255,255,0.35)'
+                  }}
+                >
+                  {/* linee principali */}
+                  <div className="absolute left-1/2 top-0 -translate-x-1/2 w-px h-full bg-white/70" />
+                  <div className="absolute left-1/2 top-[31%] -translate-x-1/2 w-[18%] h-[32%] rounded-full border border-white/70" />
+                  {/* area rigore inferiore */}
+                  <div className="absolute left-[20%] bottom-0 w-[60%] h-[22%] border-t border-white/70" />
+                  <div className="absolute left-[35%] bottom-0 w-[30%] h-[10%] border-t border-white/70" />
+                  {/* area rigore superiore */}
+                  <div className="absolute left-[20%] top-0 w-[60%] h-[22%] border-b border-white/70" />
+                  <div className="absolute left-[35%] top-0 w-[30%] h-[10%] border-b border-white/70" />
+                  {/* dischetto centrocampo */}
+                  <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-white rounded-full" />
 
                   {/* giocatori */}
-                  {bestLineup && bestLineup.assigned.map((a,i)=>{
+                  {bestLineup && bestLineup.assigned.map((a, i) => {
                     const p = a.player;
                     const left = `${a.slot.x}%`;
-                    const top  = `${a.slot.y}%`;
-                    const label = p ? (p.giocatore.length>14 ? p.giocatore.slice(0,13)+'…' : p.giocatore) : '—';
-                    const initials = p ? (p.giocatore.split(' ')[0]?.[0]||'') + (p.giocatore.split(' ')[1]?.[0]||'') : '-';
+                    const top = `${a.slot.y}%`;
+                    const initials = p ? (p.giocatore.split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase()) : '-';
+                    const label = p ? (p.giocatore.length > 14 ? p.giocatore.slice(0, 13) + '…' : p.giocatore) : '—';
                     return (
-                      <div key={`pos-${i}`} style={{left, top, transform:'translate(-50%,-50%)'}} className="absolute text-center">
-                        <div className={`mx-auto h-10 w-10 rounded-full flex items-center justify-center border shadow
-                                        ${p ? 'bg-white text-gray-900' : 'bg-white/30 text-white'}`}>
-                          <span className="text-[11px] font-semibold">{initials.toUpperCase()}</span>
+                      <div key={`pos-${i}`} style={{ left, top, transform: 'translate(-50%, -50%)' }} className="absolute text-center">
+                        <div className={`relative mx-auto h-11 w-11 rounded-full flex items-center justify-center border-2 ${p ? 'bg-white/95 text-gray-900 border-emerald-600' : 'bg-white/30 text-white border-white/50'} shadow-lg`}>
+                          {/* aureola */}
+                          <div className="absolute -z-10 inset-0 rounded-full" style={{ boxShadow: '0 0 24px rgba(16,185,129,0.45)' }} />
+                          <span className="text-[11px] font-bold">{initials}</span>
                         </div>
-                        <div className="mt-1 text-[11px] font-medium text-white drop-shadow">{label}</div>
-                        <div className="text-[10px] text-white/90">{p ? `${a.chosenRole} • FVM ${p._fvm.toFixed(0)}` : a.slot.label}</div>
+                        <div className="mt-1 text-[11px] font-medium text-white drop-shadow">
+                          {label}
+                        </div>
+                        <div className="text-[10px] text-white/85">
+                          {p ? `${a.chosenRole} • FVM ${p._fvm.toFixed(0)}` : a.slot.label}
+                        </div>
                       </div>
                     );
                   })}
                 </div>
               </div>
             </div>
+          )}
 
-            {/* riepilogo XI */}
-            <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-gray-700">
-              {bestLineup ? (
-                <>
-                  <span><strong>Formazione:</strong> {formationChoice === 'auto' ? `${bestLineup.key} (migliore)` : bestLineup.key}</span>
-                  <span>•</span>
-                  <span><strong>Titolari:</strong> {bestLineup.filled}/11</span>
-                  <span>•</span>
-                  <span><strong>Somma FVM XI:</strong> {bestLineup.sumFvm.toFixed(0)}</span>
-                  {bestLineup.filled < 11 && (
-                    <>
-                      <span>•</span>
-                      <span className="text-amber-700">XI incompleto: non ci sono abbastanza giocatori/ruoli in organico.</span>
-                    </>
-                  )}
-                </>
-              ) : (
-                <span className="text-gray-600">Nessun giocatore in organico disponibile per calcolare l’XI.</span>
-              )}
-            </div>
-
-            {/* panchina */}
-            {bestLineup && bestLineup.bench.length > 0 && (
-              <div className="mt-4">
-                <div className="text-sm font-semibold text-gray-800 mb-1">Panchina (migliori esclusi)</div>
-                <div className="flex flex-wrap gap-2">
-                  {bestLineup.bench.slice(0, 12).map(b => (
-                    <span key={String(b.id)} className="px-2 py-1 rounded-full bg-gray-100 border text-xs text-gray-800">
-                      {b.giocatore} <span className="text-gray-500">({parseRoles(b.ruolo).join('/')})</span> • FVM {getFvmHook(b).toFixed(0)}
-                    </span>
-                  ))}
-                </div>
-              </div>
+          {/* riepilogo punteggio / completezza */}
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-gray-700">
+            {bestLineup ? (
+              <>
+                <span><strong>Formazione:</strong> {formationChoice === 'auto' ? `${bestLineup.key} (migliore)` : bestLineup.key}</span>
+                <span>•</span>
+                <span><strong>Titolari:</strong> {bestLineup.filled}/11</span>
+                <span>•</span>
+                <span><strong>Somma FVM XI:</strong> {bestLineup.sumFvm.toFixed(0)}</span>
+                {bestLineup.filled < 11 && (
+                  <>
+                    <span>•</span>
+                    <span className="text-amber-700">XI incompleto: non ci sono abbastanza giocatori/ruoli in organico.</span>
+                  </>
+                )}
+              </>
+            ) : (
+              <span className="text-gray-600">Nessun giocatore in organico disponibile per calcolare l’XI.</span>
             )}
           </div>
-        )}
-        {/* ---------- fine XI ---------- */}
 
-        {/* Statistiche */}
+          {/* panchina */}
+          {bestLineup && bestLineup.bench.length > 0 && (
+            <div className="mt-4">
+              <div className="text-sm font-semibold text-gray-800 mb-1">Panchina (migliori esclusi)</div>
+              <div className="flex flex-wrap gap-2">
+                {bestLineup.bench
+                  .slice(0, 12)
+                  .map(b => (
+                    <span key={b.id} className="px-2 py-1 rounded-full bg-gray-100 border text-xs text-gray-800">
+                      {b.giocatore} <span className="text-gray-500">({parseRoles(b.ruolo).join('/')})</span> • FVM {getFVM(b).toFixed(0)}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+        {/* ---------- fine blocco XI ---------- */}
+
+        {/* Statistiche (Dettaglio) */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div className="bg-white rounded-lg shadow p-4">
             <div className="flex items-center justify-between">
@@ -885,8 +1038,8 @@ async function openPlayerStats(name: string, tla: string) {
                 <p className="text-sm text-gray-600">In Scadenza</p>
                 <p className="text-2xl font-bold text-red-600">
                   {filteredData.filter(p => {
-                    if (!p.scadenzaIpotizzata || p.scadenzaIpotizzata === '#N/A') return false;
-                    const s = new Date(p.scadenzaIpotizzata);
+                    if (!isValidDate(p.scadenzaIpotizzata)) return false;
+                    const s = new Date(String(p.scadenzaIpotizzata));
                     return s.getDate() === 1 && s.getMonth() === 6 && s.getFullYear() === 2025;
                   }).length}
                 </p>
@@ -900,11 +1053,11 @@ async function openPlayerStats(name: string, tla: string) {
                 <p className="text-sm text-gray-600">Riconferme</p>
                 <p className="text-2xl font-bold text-purple-600">
                   {filteredData.filter(p => {
-                    if (!p.scadenzaIpotizzata || p.scadenzaIpotizzata === '#N/A') return false;
-                    const scad = new Date(p.scadenzaIpotizzata);
+                    if (!isValidDate(p.scadenzaIpotizzata)) return false;
+                    const scad = new Date(String(p.scadenzaIpotizzata));
                     const dopo = scad > new Date('2025-07-01');
-                    const tc = String(p.tipoContratto || '').toLowerCase();
-                    const hasDiritto = tc.includes('diritto') && !tc.includes('standard');
+                    const hasDiritto = String(p.tipoContratto || '').toLowerCase().includes('diritto')
+                      && !String(p.tipoContratto || '').toLowerCase().includes('standard');
                     return hasDiritto && dopo;
                   }).length}
                 </p>
@@ -931,88 +1084,71 @@ async function openPlayerStats(name: string, tla: string) {
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Scadenza</th>
                 </tr>
               </thead>
-             <tbody className="bg-white divide-y divide-gray-200">
-  {filteredData.length ? filteredData.map((p, i) => {
-    const scad = p.scadenzaIpotizzata && p.scadenzaIpotizzata !== '#N/A' ? new Date(p.scadenzaIpotizzata) : null;
-    const inScadenza = !!(scad && scad.getDate() === 1 && scad.getMonth() === 6 && scad.getFullYear() === 2025);
-    let rowBg = '';
-    if (p.tipoAcquisto === 'Vivaio') rowBg = 'bg-green-50';
-    else if (p.tipoAcquisto === 'Promosso da vivaio') rowBg = 'bg-blue-100';
-    else if (p.tipoContratto && (String(p.tipoContratto).toLowerCase().includes('obbligo') || String(p.tipoContratto).toLowerCase().includes('diritto'))) rowBg = 'bg-yellow-100';
+              <tbody className="bg-white divide-y divide-gray-200">
+                {filteredData.length ? filteredData.map((p, i) => {
+                  const scad = isValidDate(p.scadenzaIpotizzata) ? new Date(String(p.scadenzaIpotizzata)) : null;
+                  const inScadenza = !!(scad && scad.getDate() === 1 && scad.getMonth() === 6 && scad.getFullYear() === 2025);
+                  let rowBg = '';
+                  if (p.tipoAcquisto === 'Vivaio') rowBg = 'bg-green-50';
+                  else if (p.tipoAcquisto === 'Promosso da vivaio') rowBg = 'bg-blue-100';
+                  else if (p.tipoContratto && (String(p.tipoContratto).toLowerCase().includes('obbligo') || String(p.tipoContratto).toLowerCase().includes('diritto'))) rowBg = 'bg-yellow-100';
+                  return (
+                    <tr key={`${p.id ?? i}-${p.giocatore}`} className={`hover:bg-gray-50 transition-colors ${rowBg}`}>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div>
+                          <span className="text-sm font-medium text-gray-900">{p.giocatore}</span>
+                          <div className="text-xs text-gray-500">{p.squadraSerieA !== '#N/A' ? p.squadraSerieA : '-'}</div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                          {formatRuolo(p.ruolo)}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{p.tipoContratto || '-'}</td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="text-sm font-semibold text-gray-900">{formatFVM(p.valoreXMercato)}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-xs">
+                          <div className="text-gray-700">
+                            <span className="font-medium">Competenza:</span>{' '}
+                            <span className="text-orange-600 font-semibold">{formatIngaggio(p.ingaggioReale)}</span>
+                          </div>
+                          <div className="text-gray-600">
+                            <span className="font-medium">Giocatore:</span>{' '}
+                            <span className="text-gray-800">{formatIngaggio(p.ingaggio36)}</span>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${inScadenza ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
+                          {formatDate(p.scadenzaIpotizzata)}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                }) : (
+                  <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-500">Nessun giocatore trovato con i filtri selezionati</td></tr>
+                )}
 
-    return (
-      <tr key={`${p.id ?? i}-${p.giocatore}`} className={`hover:bg-gray-50 transition-colors ${rowBg}`}>
-        {/* NOME GIOCATORE: clic disattivato se ENABLE_STATS=false */}
-        <td className="px-6 py-4 whitespace-nowrap">
-          <div>
-            {ENABLE_STATS ? (
-              <button
-                type="button"
-                onClick={() => openPlayerStats(p.giocatore, String(p.squadraSerieA || '').toUpperCase())}
-                className="text-left text-sm font-semibold text-emerald-700 hover:text-emerald-900 hover:underline focus:outline-none"
-                title="Vedi statistiche 2024/25"
-              >
-                {p.giocatore}
-              </button>
-            ) : (
-              <span className="text-sm font-medium text-gray-900">{p.giocatore}</span>
-            )}
-            <div className="text-xs text-gray-500">
-              {p.squadraSerieA !== '#N/A' ? p.squadraSerieA : '-'}
-            </div>
-          </div>
-        </td>
-
-        <td className="px-6 py-4 whitespace-nowrap">
-          <span className="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-            {formatRuolo(p.ruolo)}
-          </span>
-        </td>
-        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{p.tipoContratto || '-'}</td>
-        <td className="px-6 py-4 whitespace-nowrap">
-          <span className="text-sm font-semibold text-gray-900">{formatFVM(p.valoreXMercato)}</span>
-        </td>
-        <td className="px-6 py-4 whitespace-nowrap">
-          <div className="text-xs">
-            <div className="text-gray-700">
-              <span className="font-medium">Competenza:</span>{' '}
-              <span className="text-orange-600 font-semibold">{formatIngaggio(p.ingaggioReale)}</span>
-            </div>
-            <div className="text-gray-600">
-              <span className="font-medium">Giocatore:</span>{' '}
-              <span className="text-gray-800">{formatIngaggio(p.ingaggio36)}</span>
-            </div>
-          </div>
-        </td>
-        <td className="px-6 py-4 whitespace-nowrap">
-          <span className={`px-2 py-1 text-xs font-medium rounded-full ${inScadenza ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
-            {formatDate(p.scadenzaIpotizzata)}
-          </span>
-        </td>
-      </tr>
-    );
-  }) : (
-    <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-500">Nessun giocatore trovato con i filtri selezionati</td></tr>
-  )}
-
-  {filteredData.length > 0 && (
-    <tr className="bg-gray-100 font-bold">
-      <td colSpan={3} className="px-6 py-3 text-right text-sm text-gray-900">TOTALI:</td>
-      <td className="px-6 py-3 whitespace-nowrap">
-        <span className="text-sm font-bold text-green-700">
-          {filteredData.reduce((sum, p) => sum + (parseFloat(String(p.valoreXMercato)) || 0), 0).toFixed(0)}
-        </span>
-      </td>
-      <td className="px-6 py-3 whitespace-nowrap">
-        <div className="text-xs text-orange-700 font-bold">
-          {filteredData.reduce((sum, p) => sum + (parseFloat(String(p.ingaggioReale)) || 0), 0).toFixed(1)}
-        </div>
-      </td>
-      <td className="px-6 py-3"></td>
-    </tr>
-  )}
-</tbody>
-
+                {filteredData.length > 0 && (
+                  <tr className="bg-gray-100 font-bold">
+                    <td colSpan={3} className="px-6 py-3 text-right text-sm text-gray-900">TOTALI:</td>
+                    <td className="px-6 py-3 whitespace-nowrap">
+                      <span className="text-sm font-bold text-green-700">
+                        {filteredData.reduce((sum, p) => sum + (Number(p.valoreXMercato) || 0), 0).toFixed(0)}
+                      </span>
+                    </td>
+                    <td className="px-6 py-3 whitespace-nowrap">
+                      <div className="text-xs text-orange-700 font-bold">
+                        {filteredData.reduce((sum, p) => sum + (Number(p.ingaggioReale) || 0), 0).toFixed(1)}
+                      </div>
+                    </td>
+                    <td className="px-6 py-3"></td>
+                  </tr>
+                )}
+              </tbody>
             </table>
             <div className="pointer-events-none absolute right-2 bottom-2 text-xs text-gray-500 bg-white/80 rounded px-2 py-1 shadow-sm md:hidden">Scorri →</div>
           </div>
@@ -1027,131 +1163,6 @@ async function openPlayerStats(name: string, tla: string) {
           </label>
         </div>
       </div>
-      {/* --- MODAL STATISTICHE GIOCATORE --- */}
-{ENABLE_STATS && playerModalOpen && (
-  <div
-    className="fixed inset-0 z-50 flex items-center justify-center"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="player-stats-title"
-    onKeyDown={(e) => { if (e.key === 'Escape') setPlayerModalOpen(false); }}
-    tabIndex={-1}
-  >
-    {/* backdrop */}
-    <div
-      className="absolute inset-0 bg-black/40"
-      onClick={() => setPlayerModalOpen(false)}
-    />
-
-    {/* card */}
-    <div className="relative z-10 w-[92vw] max-w-2xl bg-white rounded-xl shadow-2xl border">
-      <div className="px-5 py-4 border-b flex items-center justify-between">
-        <h3 id="player-stats-title" className="text-lg font-semibold text-gray-900">
-          {playerStats?.player?.name ? `Statistiche • ${playerStats.player.name}` : 'Statistiche giocatore'}
-        </h3>
-        <button
-          type="button"
-          className="rounded-md px-2 py-1 text-gray-600 hover:bg-gray-100"
-          onClick={() => setPlayerModalOpen(false)}
-        >
-          ✕
-        </button>
-      </div>
-
-      <div className="p-5">
-        {playerLoading && (
-          <div className="flex items-center gap-2 text-gray-600">
-            <div className="h-5 w-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
-            <span>Caricamento…</span>
-          </div>
-        )}
-
-        {!playerLoading && playerError && (
-          <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">
-            {playerError}
-          </div>
-        )}
-
-        {!playerLoading && !playerError && playerStats && (
-          <>
-            <div className="text-sm text-gray-600 mb-3">
-              {playerStats.team?.name} ({playerStats.team?.tla}) • Stagione {playerStats.season}
-            </div>
-
-            {/* KPI */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="text-xs text-gray-500">Presenze</div>
-                <div className="text-xl font-bold">{playerStats.aggregations?.matchesOnPitch ?? 0}</div>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="text-xs text-gray-500">Titolare</div>
-                <div className="text-xl font-bold">{playerStats.aggregations?.startingXI ?? 0}</div>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="text-xs text-gray-500">Minuti</div>
-                <div className="text-xl font-bold">{playerStats.aggregations?.minutesPlayed ?? 0}</div>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="text-xs text-gray-500">Gol</div>
-                <div className="text-xl font-bold">{playerStats.aggregations?.goals ?? 0}</div>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="text-xs text-gray-500">Assist</div>
-                <div className="text-xl font-bold">{playerStats.aggregations?.assists ?? 0}</div>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="text-xs text-gray-500">Gialli</div>
-                <div className="text-xl font-bold">{playerStats.aggregations?.yellowCards ?? 0}</div>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="text-xs text-gray-500">Giallo+Rosso</div>
-                <div className="text-xl font-bold">{playerStats.aggregations?.yellowRedCards ?? 0}</div>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="text-xs text-gray-500">Rossi</div>
-                <div className="text-xl font-bold">{playerStats.aggregations?.redCards ?? 0}</div>
-              </div>
-            </div>
-
-            {/* Ultime partite */}
-            <div>
-              <div className="text-sm font-semibold text-gray-800 mb-2">Ultime partite</div>
-              {playerStats.recentMatches?.length ? (
-                <ul className="space-y-2">
-                  {playerStats.recentMatches.slice(0, 10).map((m, i) => {
-                    const dt = new Date(m.utcDate);
-                    const fh = m.score?.fullTime?.home;
-                    const fa = m.score?.fullTime?.away;
-                    return (
-                      <li key={i} className="flex items-center justify-between border rounded-lg px-3 py-2">
-                        <div className="text-sm">
-                          <span className="font-medium">{m.homeTeam.name}</span> – <span className="font-medium">{m.awayTeam.name}</span>
-                          <span className="ml-2 text-gray-500 text-xs">{m.competition?.code || m.competition?.name}</span>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-xs text-gray-500">
-                            {dt.toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
-                          </div>
-                          {fh != null && fa != null && (
-                            <div className="text-sm font-semibold">{fh}–{fa}</div>
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : (
-                <div className="text-sm text-gray-500">Nessun match in range.</div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  </div>
-)}
-
     </div>
   );
 };
