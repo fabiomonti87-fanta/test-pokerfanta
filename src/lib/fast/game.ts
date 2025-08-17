@@ -2,88 +2,84 @@
 export type Mode = 'classic' | 'top100';
 export type TableStatus = 'waiting' | 'running' | 'finished';
 
+export type ClassicRole = 'P' | 'D' | 'C' | 'A';
+
+export interface Player {
+  id: string;
+  name: string;
+  team: string;
+  role: ClassicRole;
+  price: number;        // FVM/Quotazione
+}
+
 export interface Seat {
-  name: string;       // “utente” o bot
+  name: string;         // utente o bot
   isBot: boolean;
-  score?: number;     // riempito a fine simulazione
-  prize?: number;     // payout ricevuto (€)
+  score?: number;       // a fine simulazione
+  prize?: number;       // payout
+  // ----- Classic builder -----
+  team?: Player[];      // rosa confermata
+  budgetLeft?: number;  // crediti residui
 }
 
 export interface Table {
   id: string;
   mode: Mode;
   buyIn: number;          // 1, 5, 10
-  rake: number;           // 0.10 (10%)
-  capacity: number;       // classic: 20 (demo); top100: 10
+  rake: number;           // 0.10
+  capacity: number;       // classic: 20, top100: 10
   status: TableStatus;
   createdAt: number;
   seats: Seat[];
-  winners?: Seat[];       // ordinati per rank (a fine simulazione)
-  pot?: number;           // pot netto (dopo rake)
-  rakeTotal?: number;     // rake totale
+  winners?: Seat[];
+  pot?: number;
+  rakeTotal?: number;
 }
 
 export const BUY_INS = [1, 5, 10] as const;
 export const DEMO_RAKE = 0.10;
 
-// Per la demo: capacity fissa per modalità
 export const CAPACITY_BY_MODE: Record<Mode, number> = {
-  classic: 20, // in demo usiamo solo 20 (50/100 solo come filtro "nominale")
-  top100: 10,
+  classic: 20,  // demo
+  top100: 10,   // demo
 };
 
-// Payout (percentuale del pot) per capacity standard
-// Somma = 90% (pot netto, perché 10% è rake)
+// payout percent per pot (dopo rake) — demo
 const PAYOUTS: Record<number, number[]> = {
-  20: [40, 25, 15, 6, 4],                                 // top 5
-  50: [20, 15, 12, 10, 8, 7, 6, 5, 4, 3],                 // top 10
-  100: [16, 13, 10, 8, 7, 6, 6, 5, 4, 4, 3.5, 3, 2.5, 2, 1.5, 1, 1, 1], // top 18
-  10: [50, 30, 10],                                       // top 3 (Top100)
+  20: [40, 25, 15, 6, 4],
+  50: [20, 15, 12, 10, 8, 7, 6, 5, 4, 3],
+  100:[16,13,10,8,7,6,6,5,4,4,3.5,3,2.5,2,1.5,1,1,1],
+  10: [50, 30, 10],
 };
 
 export function payoutPerc(capacity: number): number[] {
   return PAYOUTS[capacity] ?? [];
 }
-
 export function euros(n: number): number {
   return Math.round(n * 100) / 100;
 }
-
 export function newId(prefix = 'tbl'): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
+  return `${prefix}_${Math.random().toString(36).slice(2,10)}_${Date.now().toString(36)}`;
 }
-
 export function makeBotName(i: number): string {
-  const pool = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Lima', 'Kilo', 'Sierra', 'Tango', 'Zeta', 'Omega'];
+  const pool = ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Lima','Kilo','Sierra','Tango','Zeta','Omega'];
   const nick = pool[i % pool.length];
-  return `Bot ${nick}${i > pool.length ? `-${Math.floor(i / pool.length)}` : ''}`;
+  return `Bot ${nick}${i >= pool.length ? `-${Math.floor(i/pool.length)+1}` : ''}`;
 }
 
-// ------------ Simulazioni punteggio ------------
-// Nota: sono RNG differenti per dare "feeling" diverso tra Classic e Top100
+// --------- simulazioni punteggio (demo) ----------
 function randNormal(mu: number, sigma: number): number {
-  // Box-Muller: due uniformi (0,1) -> normale
   let u = 0, v = 0;
-  while (u === 0) u = Math.random();
-  while (v === 0) v = Math.random();
-  const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+  while (!u) u = Math.random();
+  while (!v) v = Math.random();
+  const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
   return mu + z * sigma;
 }
-
 export function simulateClassicScores(seats: Seat[]): Seat[] {
-  // Punteggio medio 70, varianza discreta
-  return seats.map(s => ({
-    ...s,
-    score: Math.max(10, Math.round(randNormal(70, 15))),
-  }));
+  return seats.map(s => ({ ...s, score: Math.max(10, Math.round(randNormal(70, 15))) }));
 }
-
 export function simulateTop100Scores(seats: Seat[]): Seat[] {
-  // Punteggi più "swingy"
-  return seats.map(s => ({
-    ...s,
-    score: Math.max(5, Math.round(randNormal(65, 22))),
-  }));
+  return seats.map(s => ({ ...s, score: Math.max(5, Math.round(randNormal(65, 22))) }));
 }
 
 export function computePayouts(table: Table): Table {
@@ -94,19 +90,10 @@ export function computePayouts(table: Table): Table {
   const rakeTotal = euros(gross * table.rake);
   const pot = euros(gross - rakeTotal);
 
-  // Ordina per score desc
   const sorted = [...table.seats].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   const winnersCount = Math.min(perc.length, sorted.length);
-
   for (let i = 0; i < winnersCount; i++) {
-    const prize = euros((perc[i] / 100) * pot);
-    sorted[i].prize = prize;
+    sorted[i].prize = euros((perc[i] / 100) * pot);
   }
-
-  return {
-    ...table,
-    winners: sorted.slice(0, winnersCount),
-    pot,
-    rakeTotal,
-  };
+  return { ...table, winners: sorted.slice(0, winnersCount), pot, rakeTotal };
 }
