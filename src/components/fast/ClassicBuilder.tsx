@@ -21,6 +21,7 @@ export default function ClassicBuilder({ initialPlayers = [], onConfirm }: Props
 
   const budgetUsed = useMemo(() => selected.reduce((s, p) => s + p.price, 0), [selected]);
   const budgetLeft = BUDGET - budgetUsed;
+  const [uploadMsg, setUploadMsg] = useState<string>('');
 
   const counts = useMemo(() => {
     return selected.reduce((acc, p) => {
@@ -54,11 +55,23 @@ export default function ClassicBuilder({ initialPlayers = [], onConfirm }: Props
     );
   }, [players, q]);
 
-  const onUpload = async (file: File) => {
+const onUpload = async (file: File) => {
+  try {
+    setUploadMsg('Caricamento…');
     const buf = await file.arrayBuffer();
     const parsed = parsePlayersFromXLSX(buf);
-    setPlayers(parsed);
-  };
+    if (!parsed.length) {
+      setPlayers([]);
+      setUploadMsg('⚠️ Nessun giocatore riconosciuto. Controlla il file (riga intestazioni Nome/Squadra/Qt.A).');
+    } else {
+      setPlayers(parsed);
+      setUploadMsg(`✅ Caricati ${parsed.length} giocatori dal listone.`);
+    }
+  } catch (e) {
+    console.error(e);
+    setUploadMsg('❌ Errore durante la lettura del file.');
+  }
+};
 
   const remove = (id: string) => setSelected(sel => sel.filter(s => s.id !== id));
 
@@ -79,6 +92,11 @@ export default function ClassicBuilder({ initialPlayers = [], onConfirm }: Props
               placeholder="Cerca nome o squadra…"
               className="pl-9 pr-3 py-2 rounded-lg bg-white/10 text-white placeholder-gray-300 border border-white/20 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
+            {uploadMsg && (
+  <div className="text-xs text-emerald-200/90 bg-emerald-900/30 border border-emerald-500/30 rounded-md px-2 py-1 ml-2">
+    {uploadMsg}
+  </div>
+)}
           </div>
           <button
             onClick={() => fileRef.current?.click()}
