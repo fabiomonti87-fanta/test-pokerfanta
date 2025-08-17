@@ -3,25 +3,28 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { ClassicRole, Player } from '@/lib/fast/game';
 import { parsePlayersFromXLSX } from '@/lib/fast/players';
-import { Upload, Trash2, CheckCircle2, Search } from 'lucide-react';
+import { Upload, Trash2, CheckCircle2, Search, Shuffle } from 'lucide-react';
 
 const TARGET = { P: 3, D: 8, C: 8, A: 6 } as const;
-const BUDGET = 1000;
 
 type Props = {
-  initialPlayers?: Player[];                 // opzionale
+  budget: number;                         // 1000 o 200
+  initialPlayers?: Player[];
   onConfirm: (team: Player[], budgetLeft: number) => void;
 };
 
-export default function ClassicBuilder({ initialPlayers = [], onConfirm }: Props) {
+export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm }: Props) {
   const [players, setPlayers] = useState<Player[]>(initialPlayers);
   const [selected, setSelected] = useState<Player[]>([]);
   const [q, setQ] = useState('');
+  const [uploadMsg, setUploadMsg] = useState<string>('');
   const fileRef = useRef<HTMLInputElement | null>(null);
 
+  // distribuzione percentuale P/D/C/A (consigliata 10/16/23/51)
+  const [dist, setDist] = useState<{P:number;D:number;C:number;A:number}>({ P:10, D:16, C:23, A:51 });
+
   const budgetUsed = useMemo(() => selected.reduce((s, p) => s + p.price, 0), [selected]);
-  const budgetLeft = BUDGET - budgetUsed;
-  const [uploadMsg, setUploadMsg] = useState<string>('');
+  const budgetLeft = budget - budgetUsed;
 
   const counts = useMemo(() => {
     return selected.reduce((acc, p) => {
@@ -50,28 +53,129 @@ export default function ClassicBuilder({ initialPlayers = [], onConfirm }: Props
     const list = players.slice().sort((a,b) => a.role.localeCompare(b.role) || a.price - b.price);
     if (!s) return list;
     return list.filter(p =>
-      p.name.toLowerCase().includes(s) ||
-      p.team.toLowerCase().includes(s)
+      p.name.toLowerCase().includes(s) || p.team.toLowerCase().includes(s)
     );
   }, [players, q]);
 
-const onUpload = async (file: File) => {
-  try {
-    setUploadMsg('Caricamento…');
-    const buf = await file.arrayBuffer();
-    const parsed = parsePlayersFromXLSX(buf);
-    if (!parsed.length) {
-      setPlayers([]);
-      setUploadMsg('⚠️ Nessun giocatore riconosciuto. Controlla il file (riga intestazioni Nome/Squadra/Qt.A).');
-    } else {
-      setPlayers(parsed);
-      setUploadMsg(`✅ Caricati ${parsed.length} giocatori dal listone.`);
+  const onUpload = async (file: File) => {
+    try {
+      setUploadMsg('Caricamento…');
+      const buf = await file.arrayBuffer();
+      const parsed = parsePlayersFromXLSX(buf);
+      if (!parsed.length) {
+        setPlayers([]);
+        setUploadMsg('⚠️ Nessun giocatore riconosciuto. Controlla intestazioni (Nome/Squadra/R/Qt.A).');
+      } else {
+        setPlayers(parsed);
+        setUploadMsg(`✅ Caricati ${parsed.length} giocatori dal listone.`);
+      }
+    } catch (e) {
+      console.error(e);
+      setUploadMsg('❌ Errore durante la lettura del file.');
     }
-  } catch (e) {
-    console.error(e);
-    setUploadMsg('❌ Errore durante la lettura del file.');
+  };
+
+  // ---------- RANDOMIZZATORE ----------
+  function randomizeTeam() {
+    if (!players.length) {
+      alert('Carica prima il listone (Excel).');
+      return;
+    }
+    // gruppi per ruolo
+    const byRole: Record<ClassicRole, Player[]> = {
+      P: players.filter(p => p.role === 'P').sort((a,b)=>a.price-b.price),
+      D: players.filter(p => p.role === 'D').sort((a,b)=>a.price-b.price),
+      C: players.filter(p => p.role === 'C').sort((a,b)=>a.price-b.price),
+      A: players.filter(p => p.role === 'A').sort((a,b)=>a.price-b.price),
+    };
+
+    // budget "per ruolo" in base alla distribuzione
+    const roleBudget: Record<ClassicRole, number> = {
+      P: Math.floor((dist.P/100) * budget),
+      D: Math.floor((dist.D/100) * budget),
+      C: Math.floor((dist.C/100) * budget),
+      A: Math.floor((dist.A/100) * budget),
+    };
+
+    // selezione: prendi a caso tra i più economici compatibili col budget/ruolo
+    function pick(role: ClassicRole, need: number): Player[] {
+      const pool = byRole[role];
+      if (pool.length < need) return [];
+      // soglia prezzo media desiderata
+      const avg = roleBudget[role] / need;
+      let factor = 1.25;
+      let candidates = pool.filter(p => p.price <= avg * factor);
+      while (candidates.length < need && factor < 2.2) {
+        factor += 0.2;
+        candidates = pool.filter(p => p.price <= avg * factor);
+      }
+      if (candidates.length < need) candidates = pool.slice(0, Math.max(need*4, 30));
+
+      const chosen: Player[] = [];
+      const used = new Set<string>();
+      const cand = candidates.slice();
+      for (let i = 0; i < need && cand.length; i++) {
+        const idx = Math.floor(Math.random()*cand.length);
+        const p = cand.splice(idx,1)[0];
+        if (used.has(p.id)) { i--; continue; }
+        chosen.push(p); used.add(p.id);
+      }
+      // se per qualsiasi motivo non ho raggiunto need, riempi con i più economici non usati
+      let j = 0;
+      while (chosen.length < need && j < pool.length) {
+        const p = pool[j++]; if (used.has(p.id)) continue; chosen.push(p); used.add(p.id);
+      }
+      return chosen.slice(0, need);
+    }
+
+    let team: Player[] = [
+      ...pick('P', TARGET.P),
+      ...pick('D', TARGET.D),
+      ...pick('C', TARGET.C),
+      ...pick('A', TARGET.A),
+    ];
+
+    // se sfora il budget, sostituisci i più costosi con alternative economiche
+    const total = (arr: Player[]) => arr.reduce((s,p)=>s+p.price,0);
+    if (total(team) > budget) {
+      const byRoleAll: Record<ClassicRole, Player[]> = {
+        P: byRole.P, D: byRole.D, C: byRole.C, A: byRole.A
+      };
+      const used = new Set(team.map(t=>t.id));
+      function cheaper(r: ClassicRole, currentPrice: number, exclude: Set<string>): Player | null {
+        const list = byRoleAll[r].filter(p => !exclude.has(p.id) && p.price < currentPrice);
+        return list.length ? list[0] : null;
+        // (lista già ordinata ascendente)
+      }
+      let guard = 0;
+      while (total(team) > budget && guard < 200) {
+        guard++;
+        // trova il più caro
+        let idxMax = 0;
+        for (let i = 1; i < team.length; i++) if (team[i].price > team[idxMax].price) idxMax = i;
+        const victim = team[idxMax];
+        const role = victim.role;
+        const swap = cheaper(role, victim.price, used);
+        if (!swap) break;
+        used.delete(victim.id);
+        used.add(swap.id);
+        team[idxMax] = swap;
+      }
+    }
+
+    // se ancora sfora… fallback: prendi i più economici per ruolo
+    if (team.reduce((s,p)=>s+p.price,0) > budget) {
+      team = [
+        ...byRole.P.slice(0, TARGET.P),
+        ...byRole.D.slice(0, TARGET.D),
+        ...byRole.C.slice(0, TARGET.C),
+        ...byRole.A.slice(0, TARGET.A),
+      ];
+    }
+
+    setSelected(team);
   }
-};
+  // ---------- /RANDOMIZZATORE ----------
 
   const remove = (id: string) => setSelected(sel => sel.filter(s => s.id !== id));
 
@@ -81,7 +185,9 @@ const onUpload = async (file: File) => {
       <div className="p-4 md:p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-b border-white/10">
         <div>
           <h3 className="text-xl font-bold text-white tracking-wide">Classic • Crea la tua rosa (25)</h3>
-          <p className="text-emerald-200/80 text-sm">Budget <span className="font-semibold">1000</span> • 3P/8D/8C/6A • Carica l’Excel “Quotazioni Fantacalcio”.</p>
+          <p className="text-emerald-200/80 text-sm">
+            Budget <span className="font-semibold">{budget}</span> • 3P/8D/8C/6A • Carica l’Excel “Quotazioni Fantacalcio”.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -92,11 +198,6 @@ const onUpload = async (file: File) => {
               placeholder="Cerca nome o squadra…"
               className="pl-9 pr-3 py-2 rounded-lg bg-white/10 text-white placeholder-gray-300 border border-white/20 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
-            {uploadMsg && (
-  <div className="text-xs text-emerald-200/90 bg-emerald-900/30 border border-emerald-500/30 rounded-md px-2 py-1 ml-2">
-    {uploadMsg}
-  </div>
-)}
           </div>
           <button
             onClick={() => fileRef.current?.click()}
@@ -108,12 +209,53 @@ const onUpload = async (file: File) => {
             type="file" ref={fileRef} accept=".xlsx,.xls"
             className="hidden" onChange={e => e.target.files?.[0] && onUpload(e.target.files[0])}
           />
+          {uploadMsg && (
+            <div className="text-xs text-emerald-200/90 bg-emerald-900/30 border border-emerald-500/30 rounded-md px-2 py-1">
+              {uploadMsg}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* pannello distribuzione / random */}
+      <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-white border-b border-white/10">
+        <div className="rounded-lg bg-white/5 p-3">
+          <div className="text-sm font-semibold mb-2">Distribuzione crediti %</div>
+          <div className="grid grid-cols-4 gap-3">
+            {(['P','D','C','A'] as ClassicRole[]).map(r => (
+              <label key={r} className="text-xs">
+                <div className="mb-1 text-white/80">Ruolo {r}</div>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={(dist as any)[r]}
+                  onChange={e => {
+                    const v = Math.max(0, Math.min(100, Number(e.target.value)||0));
+                    setDist(prev => ({ ...prev, [r]: v }));
+                  }}
+                  className="w-full text-black rounded-md px-2 py-1"
+                />
+              </label>
+            ))}
+          </div>
+          <div className="mt-2 text-xs text-white/70">Consiglio: P10 • D16 • C23 • A51 (somma 100).</div>
+        </div>
+        <div className="rounded-lg bg-white/5 p-3 flex flex-col justify-between">
+          <div className="text-sm font-semibold mb-2">Randomizzatore</div>
+          <p className="text-sm text-white/80 mb-2">Crea una rosa casuale rispettando budget e ruoli. Poi puoi rifinire a mano.</p>
+          <button
+            onClick={randomizeTeam}
+            className="inline-flex items-center gap-2 self-start px-3 py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-700 text-white"
+          >
+            <Shuffle size={16}/> Randomizza rosa
+          </button>
         </div>
       </div>
 
       {/* Dashboard budget/contatori */}
-      <div className="p-4 grid grid-cols-2 md:grid-cols-6 gap-3 text-white">
-        <Stat label="Budget" value={BUDGET} />
+      <div className="p-4 grid grid-cols-2 md:grid-cols-7 gap-3 text-white">
+        <Stat label="Budget" value={budget} />
         <Stat label="Speso" value={budgetUsed} warn />
         <Stat label="Rimanente" value={budgetLeft} good />
         <Counter label="P" n={counts.P||0} tot={TARGET.P} />
@@ -196,7 +338,7 @@ const onUpload = async (file: File) => {
           </button>
           {!fullOk && (
             <div className="mt-2 text-xs text-amber-300">
-              Requisiti: 25 giocatori • 3P/8D/8C/6A • budget ≤ 1000
+              Requisiti: 25 giocatori • 3P/8D/8C/6A • budget ≤ {budget}
             </div>
           )}
         </div>
