@@ -7,18 +7,12 @@ import ClassicBuilder from '@/components/fast/ClassicBuilder';
 import {
   Table, simulateClassicScores, simulateTop100Scores, computePayouts,
 } from '@/lib/fast/game';
-import { Users, TimerReset, Crown, Home, ArrowLeft, Loader2, Gamepad2 } from 'lucide-react';
+import { Users, TimerReset, Crown, Home, ArrowLeft, Loader2, Gamepad2, Wallet } from 'lucide-react';
 
 const KEY = 'fast.demo.lobby.tables';
 
-function loadAll(): Table[] {
-  if (typeof window === 'undefined') return [];
-  try { return JSON.parse(localStorage.getItem(KEY) || '[]') as Table[]; } catch { return []; }
-}
-function saveAll(tables: Table[]) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(KEY, JSON.stringify(tables));
-}
+function loadAll(): Table[] { if (typeof window==='undefined') return []; try { return JSON.parse(localStorage.getItem(KEY)||'[]') as Table[]; } catch { return []; } }
+function saveAll(tables: Table[]) { if (typeof window==='undefined') return; localStorage.setItem(KEY, JSON.stringify(tables)); }
 
 export default function FastTablePage() {
   const { tableId } = useParams<{ tableId: string }>();
@@ -43,16 +37,12 @@ export default function FastTablePage() {
 
   function onConfirmTeam(team: any[], budgetLeft: number) {
     if (!table || meIdx < 0) return;
-    const updated: Table = {
-      ...table,
-      seats: table.seats.map((s, i) => i === meIdx ? { ...s, team, budgetLeft } : s)
-    };
+    const updated: Table = { ...table, seats: table.seats.map((s,i)=> i===meIdx ? ({...s, team, budgetLeft}) : s) };
     updateTable(updated);
   }
 
   function simulateNow() {
-    if (!table) return;
-    if (table.status === 'finished') return;
+    if (!table || table.status === 'finished') return;
     setLoadingSim(true);
     setTimeout(() => {
       const withScores = table.mode === 'classic'
@@ -61,7 +51,7 @@ export default function FastTablePage() {
       const finalized = { ...computePayouts(withScores), status: 'finished' as const };
       updateTable(finalized);
       setLoadingSim(false);
-    }, 1200);
+    }, 1000);
   }
 
   if (!table) {
@@ -81,12 +71,12 @@ export default function FastTablePage() {
     <div className="min-h-screen p-4 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-900 via-slate-900 to-black">
       <div className="max-w-5xl mx-auto">
         {/* Header */}
-        <div className="bg-black/40 backdrop-blur border border-emerald-500/40 rounded-2xl p-4 mb-4 shadow-[0_0_40px_rgba(16,185,129,0.15)]">
+        <div className="bg-black/40 backdrop-blur border border-emerald-500/40 rounded-2xl p-4 mb-4 shadow-[0_0_40px_rgba(16,185,129,0.15)] text-white">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Gamepad2 className="text-emerald-400" />
+              <Gamepad2 className="text-emerald-300" />
               <div>
-                <div className="font-bold text-white">{table.mode === 'classic' ? 'Classic' : 'Top 100'} • €{table.buyIn}</div>
+                <div className="font-bold">Fast Fanta &amp; Go • {table.mode === 'classic' ? 'Classic' : 'Top 100'} • €{table.buyIn}</div>
                 <div className="text-xs text-white/60">{table.id}</div>
               </div>
             </div>
@@ -99,11 +89,17 @@ export default function FastTablePage() {
               </Link>
             </div>
           </div>
+          {table.mode === 'classic' && (
+            <div className="mt-2 text-sm flex items-center gap-2">
+              <Wallet size={16} className="text-emerald-300"/> Budget stack: <span className="font-semibold">{table.budgetStack ?? 1000}</span>
+              <span className="ml-4">Capienza: <strong>{table.capacity}</strong></span>
+            </div>
+          )}
         </div>
 
         {/* Step builder per Classic */}
         {needsTeam ? (
-          <ClassicBuilder onConfirm={onConfirmTeam}/>
+          <ClassicBuilder budget={table.budgetStack ?? 1000} onConfirm={onConfirmTeam}/>
         ) : (
           <>
             {/* Stato tavolo */}
