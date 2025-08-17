@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useMemo, useRef, useState } from 'react';
-import { Upload, Trash2, CheckCircle2, Search, Wand2 } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Upload, Trash2, CheckCircle2, Search, Wand2, ChevronDown } from 'lucide-react';
 import { ClassicRole, Player } from '@/lib/fast/game';
 import { parsePlayersFromXLSX } from '@/lib/fast/players';
 
@@ -16,6 +16,73 @@ type Props = {
   onConfirm: (team: Player[], budgetLeft: number) => void;
 };
 
+/** Mini select custom per palette scura (niente menù bianco di sistema) */
+function MiniSelect({
+  value,
+  options,
+  onChange,
+  className = '',
+  buttonClassName = '',
+}: {
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (v: string) => void;
+  className?: string;
+  buttonClassName?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  const current = options.find((o) => o.value === value)?.label ?? 'Seleziona';
+
+  return (
+    <div ref={ref} className={`relative ${className}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-white/10 text-white border border-white/20 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-emerald-500 ${buttonClassName}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="truncate">{current}</span>
+        <ChevronDown className="h-4 w-4 opacity-80" />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          className="absolute z-30 mt-1 w-full max-h-56 overflow-auto rounded-lg border border-white/10 bg-[#0f1b33] text-white shadow-lg"
+        >
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              role="option"
+              aria-selected={o.value === value}
+              onClick={() => {
+                onChange(o.value);
+                setOpen(false);
+              }}
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-white/10 ${
+                o.value === value ? 'bg-emerald-600/30' : ''
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm }: Props) {
   const [players, setPlayers] = useState<Player[]>(initialPlayers);
   const [selected, setSelected] = useState<Player[]>([]);
@@ -25,7 +92,7 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
   const [uploadMsg, setUploadMsg] = useState<string>('');
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  // UI indicativa (la random smart usa le sue regole)
+  // Distribuzione — adesso è *vincolante* per il randomizzatore
   const [dist, setDist] = useState<Dist>({ P: 9, D: 15, C: 30, A: 46 });
 
   const budgetUsed = useMemo(() => selected.reduce((s, p) => s + p.price, 0), [selected]);
@@ -62,10 +129,10 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
     try {
       setUploadMsg('Caricamento…');
       const buf = await file.arrayBuffer();
-      const parsed = parsePlayersFromXLSX(buf);
+      const parsed = parsePlayersFromXLSX(buf); // legge FVM (colonna L)
       if (!parsed.length) {
         setPlayers([]);
-        setUploadMsg('⚠️ Nessun giocatore riconosciuto. Attese colonne: Nome / Squadra / Ruolo / FVM (colonna L).');
+        setUploadMsg('⚠️ Nessun giocatore riconosciuto. Attese colonne: Nome / Squadra / Ruolo / FVM (col. L).');
       } else {
         setPlayers(parsed);
         setUploadMsg(`✅ Caricati ${parsed.length} giocatori (FVM).`);
@@ -76,7 +143,7 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
     }
   };
 
-  // ---------- Randomizzazione SMART (3-4-3, P9 D15 C30 A46) ----------
+  // ---------- Randomizzazione SMART (usa *davvero* la distribuzione dist) ----------
   function percentile(vals: number[], p: number): number {
     if (!vals.length) return 0;
     const v = [...vals].sort((a, b) => a - b);
@@ -92,11 +159,18 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
     } as Record<ClassicRole, Player[]>;
   }
   function roleBudgets(total: number) {
-    let P = Math.round(total * 0.09);
-    let D = Math.round(total * 0.15);
-    let C = Math.round(total * 0.30);
-    let A = total - (P + D + C);
-    const min = { P: Math.max(12, Math.floor(total * 0.05)), D: Math.max(30, Math.floor(total * 0.10)), C: Math.max(40, Math.floor(total * 0.20)) };
+    // ⇣ usa dist inserito dall’utente
+    let P = Math.round(total * (dist.P / 100));
+    let D = Math.round(total * (dist.D / 100));
+    let C = Math.round(total * (dist.C / 100));
+    let A = total - (P + D + C); // chiusura arrotondamenti su A
+
+    // minimi “di sicurezza” per tavoli low stack
+    const min = {
+      P: Math.max(12, Math.floor(total * 0.05)),
+      D: Math.max(30, Math.floor(total * 0.10)),
+      C: Math.max(40, Math.floor(total * 0.20)),
+    };
     if (P < min.P) { A -= (min.P - P); P = min.P; }
     if (D < min.D) { A -= (min.D - D); D = min.D; }
     if (C < min.C) { A -= (min.C - C); C = min.C; }
@@ -170,7 +244,7 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
       return { top: 1.6 * avg, sec: 1.0 * avg, rot: 0.6 * avg };
     }
 
-    // Portieri: tripletta stessa squadra se possibile
+    // Portieri: prova tripletta stessa squadra
     (function buildP() {
       const { top, sec } = cats.P;
       const t = targetsForRole('P', budgets.P);
@@ -282,25 +356,26 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
               className="pl-9 pr-3 py-2 rounded-lg bg-white/10 text-white placeholder-gray-300 border border-white/20 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
-          {/* Ruolo */}
-          <select
+
+          {/* Ruolo (custom select) */}
+          <MiniSelect
             value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
-            className="px-3 py-2 rounded-lg bg-white/10 text-white border border-white/20 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            title="Filtra per ruolo"
-          >
-            <option value="ALL">Tutti i ruoli</option>
-            <option value="P">P</option><option value="D">D</option><option value="C">C</option><option value="A">A</option>
-          </select>
-          {/* Squadra */}
-          <select
+            onChange={(v) => setRoleFilter(v as RoleFilter)}
+            options={[
+              { value: 'ALL', label: 'Tutti i ruoli' },
+              { value: 'P', label: 'P' },
+              { value: 'D', label: 'D' },
+              { value: 'C', label: 'C' },
+              { value: 'A', label: 'A' },
+            ]}
+          />
+
+          {/* Squadra (custom select) */}
+          <MiniSelect
             value={teamFilter}
-            onChange={(e) => setTeamFilter(e.target.value)}
-            className="px-3 py-2 rounded-lg bg-white/10 text-white border border-white/20 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            title="Filtra per squadra"
-          >
-            {teams.map((t) => <option key={t} value={t}>{t === 'ALL' ? 'Tutte le squadre' : t}</option>)}
-          </select>
+            onChange={setTeamFilter}
+            options={teams.map((t) => ({ value: t, label: t === 'ALL' ? 'Tutte le squadre' : t }))}
+          />
 
           <button onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white">
             <Upload size={16} /> Carica Excel
@@ -310,11 +385,11 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
         </div>
       </div>
 
-      {/* Distribuzione crediti (pannello emerald) + Random */}
+      {/* Distribuzione crediti (emerald) + Random */}
       <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-white border-b border-white/10">
-        {/* Pannello in tema (emerald) */}
+        {/* Pannello emerald coerente */}
         <div className="rounded-lg p-3 bg-gradient-to-br from-emerald-700 to-emerald-600 border border-emerald-400/30">
-          <div className="text-sm font-semibold mb-2">Distribuzione crediti % (indicativa)</div>
+          <div className="text-sm font-semibold mb-2">Distribuzione crediti % (vincolante per il random)</div>
           <div className="grid grid-cols-4 gap-3">
             {(['P', 'D', 'C', 'A'] as ClassicRole[]).map((r) => (
               <label key={r} className="text-xs">
@@ -334,14 +409,14 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
             ))}
           </div>
           <div className="mt-2 text-xs text-emerald-100">
-            Preset 3-4-3 consigliato: <button onClick={applyPreset} className="underline">P9 • D15 • C30 • A46</button>
+            Preset 3-4-3: <button onClick={applyPreset} className="underline">P9 • D15 • C30 • A46</button>
           </div>
         </div>
 
         <div className="rounded-lg bg-white/5 p-3 flex flex-col justify-between">
           <div className="text-sm font-semibold mb-2 text-white">Randomizzatore (smart)</div>
           <p className="text-sm text-white/80 mb-2">
-            Seleziona in modo coerente Top/Sicuri/Rotazione per ruolo, priorità 3-4-3, tripletta portieri se possibile e uso quasi totale del budget.
+            Seleziona Top/Sicuri/Rotazione per ruolo, priorità 3-4-3, tripletta portieri quando possibile, e usa quasi tutto il budget.
           </p>
           <div className="flex items-center gap-2">
             <button onClick={randomizeSmart} className="inline-flex items-center gap-2 self-start px-3 py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-700 text-white">
@@ -368,7 +443,7 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
       {/* Liste */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-0 border-t border-white/10">
         {/* Catalogo */}
-        <div className="md:col-span-2 p-4 max-h=[60vh] overflow-auto bg-white">
+        <div className="md:col-span-2 p-4 max-h-[60vh] overflow-auto bg-white">
           {players.length === 0 ? (
             <div className="text-gray-700 text-sm">
               Nessun listone caricato. Premi <strong>Carica Excel</strong> e seleziona il file con colonna <strong>FVM</strong>.
