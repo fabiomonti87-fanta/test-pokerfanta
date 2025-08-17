@@ -1,283 +1,220 @@
 'use client';
-import React, { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { Users, Trophy, Filter, PlusCircle, Rocket, Coins, Home, Gamepad2, Sliders } from 'lucide-react';
-import { BUY_INS, CAPACITY_STEPS, DEMO_RAKE, Mode, Table, newId, payoutPerc, makeBotName } from '@/lib/fast/game';
 
-type FilterState = {
-  mode: Mode;
-  buyInMinIdx: number; buyInMaxIdx: number;   // range su BUY_INS
-  capMinIdx: number;   capMaxIdx: number;     // range su CAPACITY_STEPS
+import React, { useMemo, useState } from 'react';
+import ClassicBuilder from '@/components/fast/ClassicBuilder';
+import { Roboto } from 'next/font/google';
+import { ChevronDown, ChevronUp } from 'lucide-react';
+
+const roboto = Roboto({ subsets: ['latin'], weight: ['300','400','500','700'] });
+
+type TableStatus = 'filling' | 'running' | 'completed';
+type GameKind = 'classic';
+type Table = {
+  id: string;
+  kind: GameKind;
+  buyIn: number;     // €
+  capacity: number;  // 2,4,6,10,20,50
+  status: TableStatus;
+  enrolled: number;
+  stack: number;     // budget (1000 o 200)
 };
 
-const LOBBY_KEY = 'fast.demo.lobby.tables';
-
-function loadTables(): Table[] { if (typeof window==='undefined') return []; try { return JSON.parse(localStorage.getItem(LOBBY_KEY)||'[]') as Table[]; } catch { return []; } }
-function saveTables(t: Table[]) { if (typeof window==='undefined') return; localStorage.setItem(LOBBY_KEY, JSON.stringify(t)); }
-
-function ensureDemoSeed(tables: Table[]): Table[] {
-  if (tables.length) return tables;
-  const now = Date.now();
-  const mk = (mode: Mode, buyIn: number, capacity: number, stack?: number, seats=0): Table => ({
-    id: newId('demo'), mode, buyIn, rake: DEMO_RAKE, capacity, budgetStack: stack, status: 'waiting', createdAt: now,
-    title: 'Demo', seats: Array.from({length:seats}).map((_,i)=>({name:makeBotName(i), isBot:true}))
-  });
-  const seed: Table[] = [
-    mk('classic', 1, 20, 1000, 6),
-    mk('classic', 2, 10, 200, 3),
-    mk('classic', 5, 6, 200, 2),
-    mk('classic', 10, 4, 1000, 1),
-    mk('top100', 5, 10, undefined, 4),
-    mk('classic', 20, 20, 1000, 8),
-    mk('classic', 50, 2, 200, 1),
-  ];
-  saveTables(seed); return seed;
+function simulateClassicScore() {
+  // segnaposto (soft colors a valle)
+  return 60 + Math.round(Math.random() * 50);
 }
 
-export default function FastLobbyPage() {
-  const [tables, setTables] = useState<Table[]>([]);
-  const [you, setYou] = useState<string>('');
-  const [createBuyIn, setCreateBuyIn] = useState<number>(5);
-  const [createCapacity, setCreateCapacity] = useState<number>(20);
-  const [createStack, setCreateStack] = useState<number>(1000); // 1000 o 200
-  const [f, setF] = useState<FilterState>({
-    mode: 'classic',
-    buyInMinIdx: 0, buyInMaxIdx: BUY_INS.length-1,
-    capMinIdx: 0, capMaxIdx: 4, // fino a 20 di default
-  });
+export default function FastPage() {
+  const [view, setView] = useState<'lobby'|'builder'|'result'>('lobby');
+  const [currentTable, setCurrentTable] = useState<Table | null>(null);
+  const [resultScore, setResultScore] = useState<number | null>(null);
 
-  useEffect(() => {
-    setTables(ensureDemoSeed(loadTables()));
-    const saved = localStorage.getItem('fast.demo.you') || '';
-    setYou(saved || `Player_${Math.random().toString(36).slice(2,6)}`);
-  }, []);
-  useEffect(() => { if (you) localStorage.setItem('fast.demo.you', you); }, [you]);
+  // DEMO: tavoli base
+  const [tables, setTables] = useState<Table[]>([
+    { id: 't1', kind: 'classic', buyIn: 1,  capacity: 20, status: 'filling',  enrolled: 12, stack: 1000 },
+    { id: 't2', kind: 'classic', buyIn: 2,  capacity: 10, status: 'running',  enrolled: 10, stack: 200  },
+    { id: 't3', kind: 'classic', buyIn: 5,  capacity: 20, status: 'completed',enrolled: 20, stack: 1000 },
+    { id: 't4', kind: 'classic', buyIn: 10, capacity: 6,  status: 'filling',  enrolled: 5,  stack: 200  },
+    { id: 't5', kind: 'classic', buyIn: 20, capacity: 4,  status: 'running',  enrolled: 4,  stack: 1000 },
+    { id: 't6', kind: 'classic', buyIn: 50, capacity: 2,  status: 'completed',enrolled: 2,  stack: 1000 },
+  ]);
 
-  const buyInMin = BUY_INS[f.buyInMinIdx];
-  const buyInMax = BUY_INS[f.buyInMaxIdx];
-  const capMin = CAPACITY_STEPS[f.capMinIdx];
-  const capMax = CAPACITY_STEPS[f.capMaxIdx];
+  // Filtri lobby
+  const [showCompleted, setShowCompleted] = useState(false); // default OFF (richiesta 2)
+  const [buyInRange, setBuyInRange] = useState<[number, number]>([1, 50]);
+  const [capRange, setCapRange] = useState<[number, number]>([2, 20]);
 
-  const filtered = useMemo(() =>
-    tables
-      .filter(t => t.mode === f.mode)
-      .filter(t => t.buyIn >= buyInMin && t.buyIn <= buyInMax)
-      .filter(t => t.capacity >= capMin && t.capacity <= capMax)
-      .sort((a,b)=>b.createdAt-a.createdAt)
-  ,[tables,f, buyInMin, buyInMax, capMin, capMax]);
+  const filteredTables = useMemo(() => {
+    return tables.filter(t => {
+      if (!showCompleted && t.status === 'completed') return false;
+      if (t.buyIn < buyInRange[0] || t.buyIn > buyInRange[1]) return false;
+      if (t.capacity < capRange[0] || t.capacity > capRange[1]) return false;
+      return true;
+    }).sort((a,b) => a.buyIn - b.buyIn || a.capacity - b.capacity);
+  }, [tables, showCompleted, buyInRange, capRange]);
+
+  // “Crea tavolo” collapsible (richiesta 1)
+  const [showCreate, setShowCreate] = useState(false);
+  const [newBuyIn, setNewBuyIn] = useState(5);
+  const [newCap, setNewCap] = useState(10);
+  const [newStack, setNewStack] = useState<1000|200>(1000);
 
   function createTable() {
-    const t: Table = {
-      id: newId('tbl'),
-      mode: f.mode,
-      buyIn: createBuyIn,
-      rake: DEMO_RAKE,
-      capacity: createCapacity,
-      budgetStack: f.mode === 'classic' ? createStack : undefined,
-      status: 'waiting',
-      createdAt: Date.now(),
-      seats: [],
-      title: 'Custom',
-    };
-    const next = [t, ...tables]; setTables(next); saveTables(next);
+    const id = `t${Date.now()}`;
+    const t: Table = { id, kind: 'classic', buyIn: newBuyIn, capacity: newCap, status: 'filling', enrolled: 0, stack: newStack };
+    setTables(prev => [t, ...prev]);
+    setShowCreate(false);
   }
 
-  function joinTable(id: string) {
-    const next = tables.map(t => {
-      if (t.id!==id || t.status!=='waiting' || t.seats.length>=t.capacity || t.seats.some(s=>s.name===you)) return t;
-      return { ...t, seats:[...t.seats, { name: you || 'Guest', isBot:false }] };
-    });
-    setTables(next); saveTables(next);
+  function joinTable(t: Table) {
+    setCurrentTable(t);
+    setView('builder');
   }
-
-  function fillAndStart(id: string) {
-    const next = tables.map(t => {
-      if (t.id!==id || t.status!=='waiting') return t;
-      let seats=[...t.seats];
-      for (let i=seats.length;i<t.capacity;i++) seats.push({ name: `Bot ${i+1}`, isBot:true });
-      return { ...t, seats, status:'running' as const };
-    });
-    setTables(next); saveTables(next);
-  }
-
-  // helpers marks
-  const marks = (arr: readonly number[]) => arr.map((v,i)=><span key={i} className="text-xs text-white/70">{v}</span>);
 
   return (
-    <div className="min-h-screen p-4"
-         style={{ backgroundImage: "radial-gradient(ellipse at top, rgba(16,185,129,0.08), rgba(0,0,0,0.85)), url('/fast/bg.jpg')", backgroundSize:'cover', backgroundPosition:'center' }}>
-      <div className="mx-auto max-w-6xl">
-        {/* Header */}
-        <div className="bg-black/40 backdrop-blur border border-emerald-500/40 rounded-2xl p-4 mb-4 shadow-[0_0_40px_rgba(16,185,129,0.15)]">
-          <div className="flex items-center justify-between text-white">
-            <div className="flex items-center gap-3">
-              <Rocket className="text-emerald-300" />
-              <h1 className="text-2xl font-bold tracking-wide">Fast Fanta &amp; Go — Lobby (Demo)</h1>
-            </div>
-            <Link href="/" className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
-              <Home size={16}/> App
-            </Link>
+    <main className={`${roboto.className} min-h-screen bg-gradient-to-br from-[#0b1222] via-[#0f1b33] to-[#0b1222] text-white p-4`}>
+      {view === 'lobby' && (
+        <div className="max-w-6xl mx-auto space-y-4">
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold">Fast Fanta &amp; Go</h1>
+            <button
+              onClick={() => setShowCreate(s => !s)}
+              className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700"
+            >
+              {showCreate ? 'Chiudi pannello' : 'Crea tavolo'}
+            </button>
           </div>
-        </div>
 
-        {/* Filters */}
-        <div className="bg-black/40 backdrop-blur border border-emerald-500/40 rounded-2xl p-4 mb-4 text-white">
-          <div className="flex items-center gap-2 mb-3"><Sliders size={16}/> Filtri</div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* modalità */}
-            <div>
-              <div className="text-sm text-white/80 mb-1">Modalità</div>
-              <div className="flex gap-2">
-                {(['classic','top100'] as Mode[]).map(m => (
-                  <button key={m}
-                    onClick={()=>setF(s=>({...s, mode:m}))}
-                    className={`px-3 py-2 rounded-lg ${f.mode===m?'bg-emerald-600':'bg-white/10 hover:bg-white/20'} text-white`}>
-                    {m==='classic' ? 'Classic (25)' : 'Top 100'}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* buy-in range */}
-            <div>
-              <div className="text-sm text-white/80 mb-2">Buy-in (da {buyInMin}€ a {buyInMax}€)</div>
-              <div className="px-1">
-                <input type="range" min={0} max={BUY_INS.length-1} step={1}
-                       value={f.buyInMinIdx}
-                       onChange={e=>setF(s=>({...s, buyInMinIdx: Math.min(Number(e.target.value), s.buyInMaxIdx)}))}
-                       className="w-full"/>
-                <input type="range" min={0} max={BUY_INS.length-1} step={1}
-                       value={f.buyInMaxIdx}
-                       onChange={e=>setF(s=>({...s, buyInMaxIdx: Math.max(Number(e.target.value), s.buyInMinIdx)}))}
-                       className="w-full -mt-2"/>
-                <div className="mt-1 flex justify-between">{marks(BUY_INS)}</div>
-              </div>
-            </div>
-
-            {/* capienza range */}
-            <div>
-              <div className="text-sm text-white/80 mb-2">Giocatori (da {capMin} a {capMax})</div>
-              <div className="px-1">
-                <input type="range" min={0} max={CAPACITY_STEPS.length-1} step={1}
-                       value={f.capMinIdx}
-                       onChange={e=>setF(s=>({...s, capMinIdx: Math.min(Number(e.target.value), s.capMaxIdx)}))}
-                       className="w-full"/>
-                <input type="range" min={0} max={CAPACITY_STEPS.length-1} step={1}
-                       value={f.capMaxIdx}
-                       onChange={e=>setF(s=>({...s, capMaxIdx: Math.max(Number(e.target.value), s.capMinIdx)}))}
-                       className="w-full -mt-2"/>
-                <div className="mt-1 flex justify-between">{marks(CAPACITY_STEPS)}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Creator */}
-        <div className="bg-black/40 backdrop-blur border border-emerald-500/40 rounded-2xl p-4 mb-4 text-white">
-          <div className="flex items-center gap-2 mb-3"><PlusCircle size={16}/> Crea un tavolo</div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {/* buy-in selector (segmenti) */}
-            <div>
-              <div className="text-sm text-white/80 mb-1">Buy-in</div>
-              <div className="flex flex-wrap gap-2">
-                {BUY_INS.map(v=>(
-                  <button key={v} onClick={()=>setCreateBuyIn(v)}
-                    className={`px-3 py-2 rounded-lg ${createBuyIn===v?'bg-emerald-600':'bg-white/10 hover:bg-white/20'} text-white`}>
-                    €{v}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* capacity selector */}
-            <div>
-              <div className="text-sm text-white/80 mb-1">Giocatori</div>
-              <div className="flex flex-wrap gap-2">
-                {[2,4,6,10,20,50].map(v=>(
-                  <button key={v} onClick={()=>setCreateCapacity(v)}
-                    className={`px-3 py-2 rounded-lg ${createCapacity===v?'bg-emerald-600':'bg-white/10 hover:bg-white/20'} text-white`}>
-                    {v}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* stack (solo classic) */}
-            <div>
-              <div className="text-sm text-white/80 mb-1">Stack (budget rosa)</div>
-              <div className="flex flex-wrap gap-2">
-                {[200,1000].map(v=>(
-                  <button key={v} onClick={()=>setCreateStack(v)}
-                    className={`px-3 py-2 rounded-lg ${createStack===v?'bg-emerald-600':'bg-white/10 hover:bg-white/20'} text-white`}>
-                    {v}
-                  </button>
-                ))}
-              </div>
-              <div className="text-xs text-white/60 mt-1">Usato solo per Classic.</div>
-            </div>
-
-            {/* create */}
-            <div className="flex items-end">
-              <button onClick={createTable} className="w-full px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
-                Crea tavolo
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Tables */}
-        <div className="bg-black/40 backdrop-blur border border-emerald-500/40 rounded-2xl overflow-hidden text-white">
-          <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
-            <Filter size={16}/> Tavoli disponibili
-          </div>
-          {filtered.length===0 ? (
-            <div className="p-6 text-white/70">Nessun tavolo. Crea il primo!</div>
-          ) : (
-            <div className="divide-y divide-white/10">
-              {filtered.map(t => {
-                const joined = t.seats.length;
-                const perc = payoutPerc(t.capacity);
-                return (
-                  <div key={t.id} className="p-4 flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-lg bg-emerald-900/40 border border-emerald-500/30 flex items-center justify-center">
-                      <Gamepad2 className="text-emerald-300"/>
-                    </div>
-                    <div className="flex-1">
-                      <div className="font-semibold">
-                        {t.mode==='classic' ? 'Classic' : 'Top 100'} • €{t.buyIn} • {joined}/{t.capacity} posti
-                        {t.mode==='classic' && <span className="ml-2 text-white/70">Stack {t.budgetStack ?? 1000}</span>}
-                      </div>
-                      <div className="text-sm text-white/70">
-                        Rake {Math.round(t.rake*100)}% • Payout: {perc.length} posizioni
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-sm flex items-center gap-1">
-                        <Coins size={16}/> Buy-in: <span className="font-semibold">€{t.buyIn}</span>
-                      </div>
-                      <button
-                        onClick={()=>joinTable(t.id)}
-                        disabled={t.status!=='waiting' || t.seats.some(s=>s.name===you)}
-                        className={`px-3 py-2 rounded-lg ${t.status==='waiting' && !t.seats.some(s=>s.name===you) ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white/20 cursor-not-allowed'} text-white`}
-                      >
-                        Unisciti
-                      </button>
-                      <Link href={`/fast/table/${t.id}`} onClick={()=>fillAndStart(t.id)}
-                        className="px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
-                        Entra
-                      </Link>
-                    </div>
+          {/* Pannello Crea tavolo (collassabile) */}
+          {showCreate && (
+            <div className="rounded-xl border border-emerald-400/30 bg-white/5 p-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div>
+                  <label className="text-xs text-white/70">Buy-in (€)</label>
+                  <input
+                    type="range" min={1} max={50} step={1}
+                    value={newBuyIn}
+                    onChange={(e)=> setNewBuyIn(Number(e.target.value))}
+                    className="w-full"
+                  />
+                  <div className="text-sm mt-1">{newBuyIn}€</div>
+                </div>
+                <div>
+                  <label className="text-xs text-white/70">Capienza giocatori</label>
+                  <input
+                    type="range" min={2} max={20} step={2}
+                    value={newCap}
+                    onChange={(e)=> setNewCap(Number(e.target.value))}
+                    className="w-full"
+                  />
+                  <div className="text-sm mt-1">{newCap} giocatori</div>
+                </div>
+                <div>
+                  <label className="text-xs text-white/70">Stack/Budget</label>
+                  <div className="flex gap-2 mt-1">
+                    <button
+                      onClick={()=> setNewStack(1000)}
+                      className={`px-3 py-2 rounded-lg ${newStack===1000?'bg-emerald-600':'bg-white/10 hover:bg-white/15'}`}
+                    >1000</button>
+                    <button
+                      onClick={()=> setNewStack(200)}
+                      className={`px-3 py-2 rounded-lg ${newStack===200?'bg-emerald-600':'bg-white/10 hover:bg-white/15'}`}
+                    >200</button>
                   </div>
-                );
-              })}
+                </div>
+                <div className="flex items-end">
+                  <button onClick={createTable} className="w-full px-3 py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-700">Crea</button>
+                </div>
+              </div>
+              <p className="text-xs text-white/60 mt-2">Nota: nella demo la rake non viene applicata realmente, è solo un placeholder.</p>
             </div>
           )}
-        </div>
 
-        <p className="mt-4 text-xs text-white/60">
-          Demo: nessuna persistenza server. I posti vengono riempiti da bot e la partita è simulata.
-        </p>
-      </div>
-    </div>
+          {/* Filtri lobby */}
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div>
+                <label className="text-xs text-white/70">Filtra buy-in (€)</label>
+                <div className="flex items-center gap-3">
+                  <input type="range" min={1} max={50} step={1} value={buyInRange[0]} onChange={(e)=> setBuyInRange([Number(e.target.value), buyInRange[1]])} className="w-full" />
+                  <input type="range" min={1} max={50} step={1} value={buyInRange[1]} onChange={(e)=> setBuyInRange([buyInRange[0], Number(e.target.value)])} className="w-full" />
+                </div>
+                <div className="text-sm mt-1">{buyInRange[0]}€ — {buyInRange[1]}€</div>
+              </div>
+              <div>
+                <label className="text-xs text-white/70">Filtra capienza</label>
+                <div className="flex items-center gap-3">
+                  <input type="range" min={2} max={20} step={2} value={capRange[0]} onChange={(e)=> setCapRange([Number(e.target.value), capRange[1]])} className="w-full" />
+                  <input type="range" min={2} max={20} step={2} value={capRange[1]} onChange={(e)=> setCapRange([capRange[0], Number(e.target.value)])} className="w-full" />
+                </div>
+                <div className="text-sm mt-1">{capRange[0]} — {capRange[1]} gioc.</div>
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={()=> setShowCompleted(s=> !s)}
+                  className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15"
+                >
+                  {showCompleted ? 'Nascondi completati' : 'Mostra completati'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Lista tavoli */}
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {filteredTables.map(t => (
+              <div key={t.id} className="rounded-xl border border-white/10 bg-white/5 p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-sm text-white/70">Classic • stack {t.stack}</div>
+                  <span className={`text-xs px-2 py-1 rounded-full ${t.status==='completed'?'bg-gray-600/40':t.status==='running'?'bg-emerald-700/50':'bg-amber-700/50'}`}>
+                    {t.status}
+                  </span>
+                </div>
+                <div className="text-2xl font-bold">{t.buyIn}€</div>
+                <div className="text-sm text-white/80 mb-3">{t.enrolled}/{t.capacity} iscritti</div>
+                <button
+                  onClick={()=> joinTable(t)}
+                  className="w-full px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-500/40"
+                  disabled={t.status==='completed'}
+                >
+                  {t.status==='completed' ? 'Chiuso' : 'Entra'}
+                </button>
+              </div>
+            ))}
+            {filteredTables.length===0 && (
+              <div className="col-span-full text-white/70 text-sm">Nessun tavolo con i filtri correnti.</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {view === 'builder' && currentTable && (
+        <div className="max-w-6xl mx-auto space-y-4">
+          <button onClick={()=> setView('lobby')} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15">← Torna alla lobby</button>
+          <ClassicBuilder
+            budget={currentTable.stack}
+            onConfirm={(team) => {
+              const score = simulateClassicScore();
+              setResultScore(score);
+              setView('result');
+            }}
+          />
+        </div>
+      )}
+
+      {view === 'result' && (
+        <div className="max-w-3xl mx-auto mt-6">
+          <div className="rounded-2xl border border-white/10 bg-[#0f1b33]/80 p-6 shadow-lg">
+            <h2 className="text-xl font-semibold mb-2">Simulazione completata</h2>
+            <p className="text-white/80 mb-4">Punteggio squadra (demo):</p>
+            <div className="text-5xl font-bold text-emerald-300">{resultScore}</div>
+            <p className="text-sm text-white/60 mt-3">Colori ridotti per massima leggibilità. Nella demo il calcolo è fittizio.</p>
+            <div className="mt-6 flex gap-2">
+              <button onClick={()=> setView('lobby')} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15">Torna ai tavoli</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
   );
 }
