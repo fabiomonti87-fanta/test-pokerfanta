@@ -588,64 +588,67 @@ const FantacalcioManager: React.FC = () => {
     return (
       <div className={`${roboto.className} min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-3 md:p-4`}>
         <div className="max-w-5xl mx-auto">
-          {/* Header Home */}
-          <div className="bg-white rounded-xl shadow-lg p-4 md:p-6 mb-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <h1 className="text-2xl md:text-3xl font-bold text-gray-800 flex items-center gap-2">
-                <Home className="text-green-600" /> Home - Riepilogo Squadre
-              </h1>
-<Link
-  href="/fast"
-  className="px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
->
-  🎮 Fast Mode
-</Link>             
-              {/* Search + selettore squadra + pulsante Vai al dettaglio */}
-              <div className="flex flex-col md:flex-row w-full md:w-auto items-stretch md:items-center gap-3">
-                {/* Search squadre */}
-                <div className="relative w-full md:w-80">
-                  <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
-                  <input
-                    value={homeQuery}
-                    onChange={(e) => setHomeQuery(e.target.value)}
-                    placeholder="Cerca squadra…"
-                    className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  />
-                  {homeQuery && (
-                    <button
-                      onClick={() => setHomeQuery('')}
-                      className="absolute right-2 top-2 h-7 w-7 rounded-md hover:bg-gray-100 flex items-center justify-center"
-                      aria-label="Pulisci ricerca squadre"
-                    >
-                      <X className="h-4 w-4 text-gray-500" />
-                    </button>
-                  )}
-                </div>
+     {/* Header Home */}
+<div className="bg-white rounded-xl shadow-lg p-4 md:p-6 mb-4">
+  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <h1 className="text-2xl md:text-3xl font-bold text-gray-800 flex items-center gap-2">
+      <Home className="text-green-600" /> Home - Riepilogo Squadre
+    </h1>
 
-                {/* Selettore + pulsante per entrare nel dettaglio */}
-                <div className="flex items-center gap-2 w-full md:w-auto">
-                  <select
-                    value={selectedSquadra}
-                    onChange={(e) => setSelectedSquadra(e.target.value)}
-                    className="px-3 py-2 border rounded-lg w-full md:w-auto"
-                    aria-label="Seleziona squadra"
-                  >
-                    {squadre.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
+    {/* Search + selettore + pulsanti */}
+    <div className="flex w-full md:w-auto items-center gap-3">
+      {/* Search squadre */}
+      <div className="relative w-full md:w-80">
+        <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+        <input
+          value={homeQuery}
+          onChange={(e) => setHomeQuery(e.target.value)}
+          placeholder="Cerca squadra…"
+          className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+        />
+        {homeQuery && (
+          <button
+            onClick={() => setHomeQuery('')}
+            className="absolute right-2 top-2 h-7 w-7 rounded-md hover:bg-gray-100 flex items-center justify-center"
+            aria-label="Pulisci ricerca squadre"
+          >
+            <X className="h-4 w-4 text-gray-500" />
+          </button>
+        )}
+      </div>
 
-                  <button
-                    onClick={() => setCurrentView('squadra')}
-                    disabled={!selectedSquadra}
-                    className={`px-3 py-2 rounded-lg text-white ${selectedSquadra ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-gray-300 cursor-not-allowed'}`}
-                  >
-                    Vai al dettaglio
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+      {/* Selettore + pulsanti */}
+      <div className="flex items-center gap-2 shrink-0">
+        <select
+          value={selectedSquadra}
+          onChange={(e) => setSelectedSquadra(e.target.value)}
+          className="px-3 py-2 border rounded-lg"
+          aria-label="Seleziona squadra"
+        >
+          {squadre.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+
+        <button
+          onClick={() => setCurrentView('squadra')}
+          className="px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+        >
+          Vai al dettaglio
+        </button>
+
+        {/* <-- ECCO IL BOTTONE FAST MODE */}
+        <Link
+          href="/fast"
+          className="px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+        >
+          🎮 Fast Mode
+        </Link>
+      </div>
+    </div>
+  </div>
+</div>
+
 
           {/* Tabella + Legenda */}
           <div className="bg-white rounded-xl shadow-lg overflow-hidden relative">
