@@ -7,7 +7,6 @@ const MANTRA_TO_CLASSIC: Record<string, ClassicRole> = {
   POR:'P', PC:'A', DC:'D', DD:'D', DS:'D', B:'D',
   E:'C', M:'C', C:'C', T:'C', W:'A', A:'A'
 };
-
 function toClassicRole(raw: any): ClassicRole | null {
   if (!raw) return null;
   const s = String(raw).trim().toUpperCase();
