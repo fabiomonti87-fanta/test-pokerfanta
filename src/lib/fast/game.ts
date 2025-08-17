@@ -1,7 +1,6 @@
 // src/lib/fast/game.ts
 export type Mode = 'classic' | 'top100';
 export type TableStatus = 'waiting' | 'running' | 'finished';
-
 export type ClassicRole = 'P' | 'D' | 'C' | 'A';
 
 export interface Player {
@@ -9,25 +8,26 @@ export interface Player {
   name: string;
   team: string;
   role: ClassicRole;
-  price: number;        // FVM/Quotazione
+  price: number;
 }
 
 export interface Seat {
-  name: string;         // utente o bot
+  name: string;
   isBot: boolean;
-  score?: number;       // a fine simulazione
-  prize?: number;       // payout
-  // ----- Classic builder -----
-  team?: Player[];      // rosa confermata
-  budgetLeft?: number;  // crediti residui
+  team?: Player[];
+  budgetLeft?: number;
+  score?: number;
+  prize?: number;
 }
 
 export interface Table {
   id: string;
   mode: Mode;
-  buyIn: number;          // 1, 5, 10
-  rake: number;           // 0.10
-  capacity: number;       // classic: 20, top100: 10
+  title?: string;
+  buyIn: number;
+  rake: number;            // 0.10
+  capacity: number;        // 2/4/6/10/20/50
+  budgetStack?: number;    // 200 o 1000 (solo classic)
   status: TableStatus;
   createdAt: number;
   seats: Seat[];
@@ -36,30 +36,29 @@ export interface Table {
   rakeTotal?: number;
 }
 
-export const BUY_INS = [1, 5, 10] as const;
+export const BUY_INS = [1, 2, 5, 10, 20, 50] as const;
+export const CAPACITY_STEPS = [2, 4, 6, 10, 20, 50, 100] as const;
 export const DEMO_RAKE = 0.10;
 
-export const CAPACITY_BY_MODE: Record<Mode, number> = {
-  classic: 20,  // demo
-  top100: 10,   // demo
-};
-
-// payout percent per pot (dopo rake) — demo
-const PAYOUTS: Record<number, number[]> = {
-  20: [40, 25, 15, 6, 4],
-  50: [20, 15, 12, 10, 8, 7, 6, 5, 4, 3],
-  100:[16,13,10,8,7,6,6,5,4,4,3.5,3,2.5,2,1.5,1,1,1],
-  10: [50, 30, 10],
-};
-
 export function payoutPerc(capacity: number): number[] {
-  return PAYOUTS[capacity] ?? [];
+  // percentuali sul NET pot (dopo rake) — demo
+  const map: Record<number, number[]> = {
+    2: [100],
+    4: [60, 40],
+    6: [50, 30, 20],
+    10: [50, 30, 10],     // top100 demo
+    20: [40, 25, 15, 6, 4],
+    50: [20,15,12,10,8,7,6,5,4,3],
+    100: [16,13,10,8,7,6,6,5,4,4,3.5,3,2.5,2,1.5,1,1,1],
+  };
+  return map[capacity] ?? [];
 }
+
 export function euros(n: number): number {
   return Math.round(n * 100) / 100;
 }
 export function newId(prefix = 'tbl'): string {
-  return `${prefix}_${Math.random().toString(36).slice(2,10)}_${Date.now().toString(36)}`;
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
 }
 export function makeBotName(i: number): string {
   const pool = ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Lima','Kilo','Sierra','Tango','Zeta','Omega'];
@@ -67,7 +66,7 @@ export function makeBotName(i: number): string {
   return `Bot ${nick}${i >= pool.length ? `-${Math.floor(i/pool.length)+1}` : ''}`;
 }
 
-// --------- simulazioni punteggio (demo) ----------
+// ---- simulazioni punteggio (demo) ----
 function randNormal(mu: number, sigma: number): number {
   let u = 0, v = 0;
   while (!u) u = Math.random();
@@ -85,8 +84,7 @@ export function simulateTop100Scores(seats: Seat[]): Seat[] {
 export function computePayouts(table: Table): Table {
   const capacity = table.capacity;
   const perc = payoutPerc(capacity);
-  const totalEntries = table.seats.length;
-  const gross = table.buyIn * totalEntries;
+  const gross = table.buyIn * table.seats.length;
   const rakeTotal = euros(gross * table.rake);
   const pot = euros(gross - rakeTotal);
 
