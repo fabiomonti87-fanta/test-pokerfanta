@@ -1,21 +1,35 @@
 'use client';
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Users, Trophy, Filter, PlusCircle, Rocket, Coins, Home, Gamepad2 } from 'lucide-react';
-import { BUY_INS, CAPACITY_BY_MODE, DEMO_RAKE, Mode, Table, newId, payoutPerc, makeBotName } from '@/lib/fast/game';
+import { Users, Trophy, Filter, PlusCircle, Rocket, Coins, Home, Gamepad2, Sliders } from 'lucide-react';
+import { BUY_INS, CAPACITY_STEPS, DEMO_RAKE, Mode, Table, newId, payoutPerc, makeBotName } from '@/lib/fast/game';
 
-type FilterState = { mode: Mode; buyIn: number; capacity: number; };
+type FilterState = {
+  mode: Mode;
+  buyInMinIdx: number; buyInMaxIdx: number;   // range su BUY_INS
+  capMinIdx: number;   capMaxIdx: number;     // range su CAPACITY_STEPS
+};
+
 const LOBBY_KEY = 'fast.demo.lobby.tables';
 
 function loadTables(): Table[] { if (typeof window==='undefined') return []; try { return JSON.parse(localStorage.getItem(LOBBY_KEY)||'[]') as Table[]; } catch { return []; } }
 function saveTables(t: Table[]) { if (typeof window==='undefined') return; localStorage.setItem(LOBBY_KEY, JSON.stringify(t)); }
+
 function ensureDemoSeed(tables: Table[]): Table[] {
   if (tables.length) return tables;
   const now = Date.now();
+  const mk = (mode: Mode, buyIn: number, capacity: number, stack?: number, seats=0): Table => ({
+    id: newId('demo'), mode, buyIn, rake: DEMO_RAKE, capacity, budgetStack: stack, status: 'waiting', createdAt: now,
+    title: 'Demo', seats: Array.from({length:seats}).map((_,i)=>({name:makeBotName(i), isBot:true}))
+  });
   const seed: Table[] = [
-    { id:newId('demo'), mode:'classic', buyIn:5, rake:DEMO_RAKE, capacity:CAPACITY_BY_MODE.classic, status:'waiting', createdAt:now, seats:[{name:'Guest', isBot:false}] },
-    { id:newId('demo'), mode:'classic', buyIn:1, rake:DEMO_RAKE, capacity:CAPACITY_BY_MODE.classic, status:'waiting', createdAt:now, seats:Array.from({length:6}).map((_,i)=>({name:makeBotName(i), isBot:true}))},
-    { id:newId('demo'), mode:'top100', buyIn:10, rake:DEMO_RAKE, capacity:CAPACITY_BY_MODE.top100, status:'waiting', createdAt:now, seats:Array.from({length:3}).map((_,i)=>({name:makeBotName(i), isBot:true}))},
+    mk('classic', 1, 20, 1000, 6),
+    mk('classic', 2, 10, 200, 3),
+    mk('classic', 5, 6, 200, 2),
+    mk('classic', 10, 4, 1000, 1),
+    mk('top100', 5, 10, undefined, 4),
+    mk('classic', 20, 20, 1000, 8),
+    mk('classic', 50, 2, 200, 1),
   ];
   saveTables(seed); return seed;
 }
@@ -23,7 +37,14 @@ function ensureDemoSeed(tables: Table[]): Table[] {
 export default function FastLobbyPage() {
   const [tables, setTables] = useState<Table[]>([]);
   const [you, setYou] = useState<string>('');
-  const [f, setF] = useState<FilterState>({ mode: 'classic', buyIn: 1, capacity: 20 });
+  const [createBuyIn, setCreateBuyIn] = useState<number>(5);
+  const [createCapacity, setCreateCapacity] = useState<number>(20);
+  const [createStack, setCreateStack] = useState<number>(1000); // 1000 o 200
+  const [f, setF] = useState<FilterState>({
+    mode: 'classic',
+    buyInMinIdx: 0, buyInMaxIdx: BUY_INS.length-1,
+    capMinIdx: 0, capMaxIdx: 4, // fino a 20 di default
+  });
 
   useEffect(() => {
     setTables(ensureDemoSeed(loadTables()));
@@ -32,14 +53,32 @@ export default function FastLobbyPage() {
   }, []);
   useEffect(() => { if (you) localStorage.setItem('fast.demo.you', you); }, [you]);
 
+  const buyInMin = BUY_INS[f.buyInMinIdx];
+  const buyInMax = BUY_INS[f.buyInMaxIdx];
+  const capMin = CAPACITY_STEPS[f.capMinIdx];
+  const capMax = CAPACITY_STEPS[f.capMaxIdx];
+
   const filtered = useMemo(() =>
-    tables.filter(t => t.mode===f.mode && t.buyIn===f.buyIn && (f.mode==='classic' ? [20,50,100].includes(f.capacity) : f.capacity===10))
-          .sort((a,b)=>b.createdAt-a.createdAt)
-  ,[tables,f]);
+    tables
+      .filter(t => t.mode === f.mode)
+      .filter(t => t.buyIn >= buyInMin && t.buyIn <= buyInMax)
+      .filter(t => t.capacity >= capMin && t.capacity <= capMax)
+      .sort((a,b)=>b.createdAt-a.createdAt)
+  ,[tables,f, buyInMin, buyInMax, capMin, capMax]);
 
   function createTable() {
-    const capacity = f.mode==='classic' ? CAPACITY_BY_MODE.classic : CAPACITY_BY_MODE.top100;
-    const t: Table = { id:newId('tbl'), mode:f.mode, buyIn:f.buyIn, rake:DEMO_RAKE, capacity, status:'waiting', createdAt:Date.now(), seats:[] };
+    const t: Table = {
+      id: newId('tbl'),
+      mode: f.mode,
+      buyIn: createBuyIn,
+      rake: DEMO_RAKE,
+      capacity: createCapacity,
+      budgetStack: f.mode === 'classic' ? createStack : undefined,
+      status: 'waiting',
+      createdAt: Date.now(),
+      seats: [],
+      title: 'Custom',
+    };
     const next = [t, ...tables]; setTables(next); saveTables(next);
   }
 
@@ -61,16 +100,19 @@ export default function FastLobbyPage() {
     setTables(next); saveTables(next);
   }
 
+  // helpers marks
+  const marks = (arr: readonly number[]) => arr.map((v,i)=><span key={i} className="text-xs text-white/70">{v}</span>);
+
   return (
-    <div className="min-h-screen p-4 bg-[url('/fast/bg.jpg')] bg-cover bg-center"
-         style={{ backgroundImage: "radial-gradient(ellipse at top, rgba(16,185,129,0.08), rgba(0,0,0,0.85)), url('/fast/bg.jpg')" }}>
+    <div className="min-h-screen p-4"
+         style={{ backgroundImage: "radial-gradient(ellipse at top, rgba(16,185,129,0.08), rgba(0,0,0,0.85)), url('/fast/bg.jpg')", backgroundSize:'cover', backgroundPosition:'center' }}>
       <div className="mx-auto max-w-6xl">
         {/* Header */}
         <div className="bg-black/40 backdrop-blur border border-emerald-500/40 rounded-2xl p-4 mb-4 shadow-[0_0_40px_rgba(16,185,129,0.15)]">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3 text-white">
+          <div className="flex items-center justify-between text-white">
+            <div className="flex items-center gap-3">
               <Rocket className="text-emerald-300" />
-              <h1 className="text-2xl font-bold tracking-wide">Fast Mode (Demo)</h1>
+              <h1 className="text-2xl font-bold tracking-wide">Fast Fanta &amp; Go — Lobby (Demo)</h1>
             </div>
             <Link href="/" className="inline-flex items-center gap-2 text-sm px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
               <Home size={16}/> App
@@ -80,39 +122,104 @@ export default function FastLobbyPage() {
 
         {/* Filters */}
         <div className="bg-black/40 backdrop-blur border border-emerald-500/40 rounded-2xl p-4 mb-4 text-white">
-          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <div className="text-sm text-white/80">Modalità</div>
-                <select value={f.mode} onChange={e=>setF(s=>({...s, mode:e.target.value as Mode}))}
-                  className="w-full border border-white/20 bg-white/10 text-white rounded-lg px-3 py-2">
-                  <option value="classic">Classic (25 in rosa)</option>
-                  <option value="top100">Top 100</option>
-                </select>
-              </div>
-              <div>
-                <div className="text-sm text-white/80">Buy-in</div>
-                <select value={f.buyIn} onChange={e=>setF(s=>({...s, buyIn:Number(e.target.value)}))}
-                  className="w-full border border-white/20 bg-white/10 text-white rounded-lg px-3 py-2">
-                  {BUY_INS.map(b => <option key={b} value={b}>€{b}</option>)}
-                </select>
-              </div>
-              <div>
-                <div className="text-sm text-white/80">Capienza</div>
-                <select value={f.capacity} onChange={e=>setF(s=>({...s, capacity:Number(e.target.value)}))}
-                  className="w-full border border-white/20 bg-white/10 text-white rounded-lg px-3 py-2">
-                  {f.mode==='classic' ? (<><option value={20}>20 (demo)</option><option value={50}>50 (nom.)</option><option value={100}>100 (nom.)</option></>) : (<option value={10}>10 (demo)</option>)}
-                </select>
+          <div className="flex items-center gap-2 mb-3"><Sliders size={16}/> Filtri</div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* modalità */}
+            <div>
+              <div className="text-sm text-white/80 mb-1">Modalità</div>
+              <div className="flex gap-2">
+                {(['classic','top100'] as Mode[]).map(m => (
+                  <button key={m}
+                    onClick={()=>setF(s=>({...s, mode:m}))}
+                    className={`px-3 py-2 rounded-lg ${f.mode===m?'bg-emerald-600':'bg-white/10 hover:bg-white/20'} text-white`}>
+                    {m==='classic' ? 'Classic (25)' : 'Top 100'}
+                  </button>
+                ))}
               </div>
             </div>
-            <div className="flex items-end gap-3">
-              <div>
-                <div className="text-sm text-white/80">Nickname</div>
-                <input value={you} onChange={e=>setYou(e.target.value)}
-                  className="border border-white/20 bg-white/10 text-white rounded-lg px-3 py-2" />
+
+            {/* buy-in range */}
+            <div>
+              <div className="text-sm text-white/80 mb-2">Buy-in (da {buyInMin}€ a {buyInMax}€)</div>
+              <div className="px-1">
+                <input type="range" min={0} max={BUY_INS.length-1} step={1}
+                       value={f.buyInMinIdx}
+                       onChange={e=>setF(s=>({...s, buyInMinIdx: Math.min(Number(e.target.value), s.buyInMaxIdx)}))}
+                       className="w-full"/>
+                <input type="range" min={0} max={BUY_INS.length-1} step={1}
+                       value={f.buyInMaxIdx}
+                       onChange={e=>setF(s=>({...s, buyInMaxIdx: Math.max(Number(e.target.value), s.buyInMinIdx)}))}
+                       className="w-full -mt-2"/>
+                <div className="mt-1 flex justify-between">{marks(BUY_INS)}</div>
               </div>
-              <button onClick={createTable} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
-                <PlusCircle size={18}/> Crea tavolo
+            </div>
+
+            {/* capienza range */}
+            <div>
+              <div className="text-sm text-white/80 mb-2">Giocatori (da {capMin} a {capMax})</div>
+              <div className="px-1">
+                <input type="range" min={0} max={CAPACITY_STEPS.length-1} step={1}
+                       value={f.capMinIdx}
+                       onChange={e=>setF(s=>({...s, capMinIdx: Math.min(Number(e.target.value), s.capMaxIdx)}))}
+                       className="w-full"/>
+                <input type="range" min={0} max={CAPACITY_STEPS.length-1} step={1}
+                       value={f.capMaxIdx}
+                       onChange={e=>setF(s=>({...s, capMaxIdx: Math.max(Number(e.target.value), s.capMinIdx)}))}
+                       className="w-full -mt-2"/>
+                <div className="mt-1 flex justify-between">{marks(CAPACITY_STEPS)}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Creator */}
+        <div className="bg-black/40 backdrop-blur border border-emerald-500/40 rounded-2xl p-4 mb-4 text-white">
+          <div className="flex items-center gap-2 mb-3"><PlusCircle size={16}/> Crea un tavolo</div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {/* buy-in selector (segmenti) */}
+            <div>
+              <div className="text-sm text-white/80 mb-1">Buy-in</div>
+              <div className="flex flex-wrap gap-2">
+                {BUY_INS.map(v=>(
+                  <button key={v} onClick={()=>setCreateBuyIn(v)}
+                    className={`px-3 py-2 rounded-lg ${createBuyIn===v?'bg-emerald-600':'bg-white/10 hover:bg-white/20'} text-white`}>
+                    €{v}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* capacity selector */}
+            <div>
+              <div className="text-sm text-white/80 mb-1">Giocatori</div>
+              <div className="flex flex-wrap gap-2">
+                {[2,4,6,10,20,50].map(v=>(
+                  <button key={v} onClick={()=>setCreateCapacity(v)}
+                    className={`px-3 py-2 rounded-lg ${createCapacity===v?'bg-emerald-600':'bg-white/10 hover:bg-white/20'} text-white`}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* stack (solo classic) */}
+            <div>
+              <div className="text-sm text-white/80 mb-1">Stack (budget rosa)</div>
+              <div className="flex flex-wrap gap-2">
+                {[200,1000].map(v=>(
+                  <button key={v} onClick={()=>setCreateStack(v)}
+                    className={`px-3 py-2 rounded-lg ${createStack===v?'bg-emerald-600':'bg-white/10 hover:bg-white/20'} text-white`}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+              <div className="text-xs text-white/60 mt-1">Usato solo per Classic.</div>
+            </div>
+
+            {/* create */}
+            <div className="flex items-end">
+              <button onClick={createTable} className="w-full px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
+                Crea tavolo
               </button>
             </div>
           </div>
@@ -138,6 +245,7 @@ export default function FastLobbyPage() {
                     <div className="flex-1">
                       <div className="font-semibold">
                         {t.mode==='classic' ? 'Classic' : 'Top 100'} • €{t.buyIn} • {joined}/{t.capacity} posti
+                        {t.mode==='classic' && <span className="ml-2 text-white/70">Stack {t.budgetStack ?? 1000}</span>}
                       </div>
                       <div className="text-sm text-white/70">
                         Rake {Math.round(t.rake*100)}% • Payout: {perc.length} posizioni
@@ -166,7 +274,9 @@ export default function FastLobbyPage() {
           )}
         </div>
 
-        <p className="mt-4 text-xs text-white/60">Demo: nessuna persistenza server. I posti vengono riempiti da bot e la partita è simulata.</p>
+        <p className="mt-4 text-xs text-white/60">
+          Demo: nessuna persistenza server. I posti vengono riempiti da bot e la partita è simulata.
+        </p>
       </div>
     </div>
   );
