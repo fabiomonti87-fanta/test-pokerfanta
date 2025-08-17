@@ -593,7 +593,12 @@ const FantacalcioManager: React.FC = () => {
               <h1 className="text-2xl md:text-3xl font-bold text-gray-800 flex items-center gap-2">
                 <Home className="text-green-600" /> Home - Riepilogo Squadre
               </h1>
-
+<Link
+  href="/fast"
+  className="px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+>
+  🎮 Fast Mode
+</Link>             
               {/* Search + selettore squadra + pulsante Vai al dettaglio */}
               <div className="flex flex-col md:flex-row w-full md:w-auto items-stretch md:items-center gap-3">
                 {/* Search squadre */}
