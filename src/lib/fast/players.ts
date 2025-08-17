@@ -19,7 +19,6 @@ function toClassicRole(raw: any): ClassicRole | null {
   }
   return null;
 }
-
 /** Prova a leggere i giocatori dal primo foglio dell’xlsx. */
 export function parsePlayersFromXLSX(buf: ArrayBuffer): Player[] {
   const wb = XLSX.read(buf, { type: 'array' });
