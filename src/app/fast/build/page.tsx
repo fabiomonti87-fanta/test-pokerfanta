@@ -2,7 +2,7 @@
 
 import React, { Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import ClassicBuilder from '@/components/fast/ClassicBuilder';
+import ClassicBuilder, { FormationKey, Player } from '@/components/fast/ClassicBuilder';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,19 +34,14 @@ function BuildContent() {
         <section className="bg-white/5 rounded-xl border border-white/10 p-4">
           <ClassicBuilder
             budget={stack}
-            onConfirm={(team, left) => {
-              const payload = { tableId, kind, buyIn, capacity, stack, team, left, ts: Date.now() };
-              try {
-                localStorage.setItem('fast:lastRoster', JSON.stringify(payload));
-              } catch {}
+            onConfirm={(team: Player[], left: number, formation: FormationKey) => {
+              const payload = { tableId, kind, buyIn, capacity, stack, team, left, formation, ts: Date.now() };
+              try { localStorage.setItem('fast:lastRoster', JSON.stringify(payload)); } catch {}
               const params = new URLSearchParams({
-                id: tableId,
-                buyIn: String(buyIn),
-                cap: String(capacity),
-                stack: String(stack),
-                kind,
+                id: tableId, buyIn: String(buyIn), cap: String(capacity), stack: String(stack), kind
               });
-              router.push(`/fast/result?${params.toString()}`);
+              // Vai alla schermata “Formazione”
+              router.push(`/fast/lineup?${params.toString()}`);
             }}
           />
         </section>
@@ -57,13 +52,7 @@ function BuildContent() {
 
 export default function BuildPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen grid place-items-center bg-slate-900 text-white">
-          Caricamento…
-        </div>
-      }
-    >
+    <Suspense fallback={<div className="min-h-screen grid place-items-center bg-slate-900 text-white">Caricamento…</div>}>
       <BuildContent />
     </Suspense>
   );
