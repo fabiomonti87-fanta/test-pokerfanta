@@ -94,90 +94,58 @@ export default function Page() {
           </div>
         </header>
 
-        {/* Filtri */}
-        <section className="bg-white/5 rounded-xl border border-white/10 p-4">
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
-            {/* search */}
-            <div className="md:col-span-2">
-              <label className="text-xs text-white/70">Cerca</label>
-              <div className="relative">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-white/60" />
-                <input
-                  value={q}
-                  onChange={e=>setQ(e.target.value)}
-                  placeholder="Cerca titolo, id, modalità…"
-                  className="w-full pl-9 pr-3 py-2 rounded-lg bg-white/10 text-white placeholder-white/60 border border-white/20 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-            </div>
+{/* Filtri */}
+<section className="bg-white/5 rounded-xl border border-white/10 p-4">
+  {/* RIGA 1: cerca, modalità, stack */}
+  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+    <div className="md:col-span-2">
+      <label className="text-xs text-white/70">Cerca</label>
+      <div className="relative">
+        <svg className="absolute left-3 top-2.5 h-4 w-4 text-white/60" viewBox="0 0 24 24" fill="none"><path d="M21 21l-4.3-4.3M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" strokeWidth="2" /></svg>
+        <input
+          value={q}
+          onChange={e=>setQ(e.target.value)}
+          placeholder="Cerca titolo, id, modalità…"
+          className="w-full pl-9 pr-3 py-2 rounded-lg bg-white/10 text-white placeholder-white/60 border border-white/20 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        />
+      </div>
+    </div>
+    <div>
+      <label className="text-xs text-white/70">Modalità</label>
+      <select value={kind} onChange={e=>setKind(e.target.value as any)} className="w-full px-2 py-2 rounded-lg bg-white/10 text-white border border-white/20">
+        <option value="all">Tutte</option>
+        <option value="classic">Classic</option>
+        <option value="top100">Top 100</option>
+      </select>
+    </div>
+    <div>
+      <label className="text-xs text-white/70">Stack (crediti)</label>
+      <select value={stack} onChange={e=>setStack(e.target.value==='all'?'all': Number(e.target.value) as any)} className="w-full px-2 py-2 rounded-lg bg-white/10 text-white border border-white/20">
+        <option value="all">Tutti</option>
+        <option value={200}>200</option>
+        <option value={1000}>1000</option>
+      </select>
+    </div>
+  </div>
 
-            {/* modalità */}
-            <div>
-              <label className="text-xs text-white/70">Modalità</label>
-              <select
-                value={kind}
-                onChange={e => setKind(e.target.value as any)}
-                className="w-full px-2 py-2 rounded-lg bg-white/10 text-white border border-white/20"
-              >
-                <option value="all">Tutte</option>
-                <option value="classic">Classic</option>
-                <option value="top100">Top 100</option>
-              </select>
-            </div>
-
-            {/* stack */}
-            <div>
-              <label className="text-xs text-white/70">Stack (crediti)</label>
-              <select
-                value={stack}
-                onChange={e => setStack(e.target.value === 'all' ? 'all' : Number(e.target.value) as 200|1000)}
-                className="w-full px-2 py-2 rounded-lg bg-white/10 text-white border border-white/20"
-              >
-                <option value="all">Tutti</option>
-                <option value={200}>200</option>
-                <option value={1000}>1000</option>
-              </select>
-            </div>
-
-            {/* range buy-in */}
-            <div>
-              <label className="text-xs text-white/70">Buy-in (€) • {buyInMin}–{buyInMax}</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range" min={1} max={50} step={1}
-                  value={buyInMin}
-                  onChange={e => setBuyInMin(Math.min(Number(e.target.value), buyInMax))}
-                  className="w-full"
-                />
-                <input
-                  type="range" min={1} max={50} step={1}
-                  value={buyInMax}
-                  onChange={e => setBuyInMax(Math.max(Number(e.target.value), buyInMin))}
-                  className="w-full"
-                />
-              </div>
-            </div>
-
-            {/* range capienza */}
-            <div className="md:col-span-2">
-              <label className="text-xs text-white/70">Capienza • {capMin}–{capMax}</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range" min={10} max={100} step={10}
-                  value={capMin}
-                  onChange={e => setCapMin(Math.min(Number(e.target.value) as any, capMax))}
-                  className="w-full"
-                />
-                <input
-                  type="range" min={10} max={100} step={10}
-                  value={capMax}
-                  onChange={e => setCapMax(Math.max(Number(e.target.value) as any, capMin))}
-                  className="w-full"
-                />
-              </div>
-            </div>
-          </div>
-        </section>
+  {/* RIGA 2: buy-in + capienza */}
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end mt-3">
+    <div>
+      <label className="text-xs text-white/70">Buy-in (€) • {buyInMin}–{buyInMax}</label>
+      <div className="flex items-center gap-2">
+        <input type="range" min={1} max={50} step={1} value={buyInMin} onChange={e=>setBuyInMin(Math.min(Number(e.target.value), buyInMax))} className="w-full" />
+        <input type="range" min={1} max={50} step={1} value={buyInMax} onChange={e=>setBuyInMax(Math.max(Number(e.target.value), buyInMin))} className="w-full" />
+      </div>
+    </div>
+    <div>
+      <label className="text-xs text-white/70">Capienza • {capMin}–{capMax}</label>
+      <div className="flex items-center gap-2">
+        <input type="range" min={10} max={100} step={10} value={capMin} onChange={e=>setCapMin(Math.min(Number(e.target.value) as any, capMax))} className="w-full" />
+        <input type="range" min={10} max={100} step={10} value={capMax} onChange={e=>setCapMax(Math.max(Number(e.target.value) as any, capMin))} className="w-full" />
+      </div>
+    </div>
+  </div>
+</section>
 
         {/* Pannello creazione tavolo (a comparsa) */}
         {showCreate && (
