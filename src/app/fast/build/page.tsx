@@ -2,7 +2,7 @@
 
 import React, { Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import ClassicBuilder, { FormationKey, Player } from '@/components/fast/ClassicBuilder';
+import ClassicBuilder, { Player } from '@/components/fast/ClassicBuilder';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,14 +34,12 @@ function BuildContent() {
         <section className="bg-white/5 rounded-xl border border-white/10 p-4">
           <ClassicBuilder
             budget={stack}
-            onConfirm={(team: Player[], left: number, formation: FormationKey) => {
+            onConfirm={(team: Player[], left: number, formation: any) => {
               const payload = { tableId, kind, buyIn, capacity, stack, team, left, formation, ts: Date.now() };
               try { localStorage.setItem('fast:lastRoster', JSON.stringify(payload)); } catch {}
-              const params = new URLSearchParams({
-                id: tableId, buyIn: String(buyIn), cap: String(capacity), stack: String(stack), kind
-              });
-              // Vai alla schermata “Formazione”
-              router.push(`/fast/lineup?${params.toString()}`);
+              const params = new URLSearchParams({ id: tableId, buyIn: String(buyIn), cap: String(capacity), stack: String(stack), kind });
+              // vai alla pagina SCHIERA XI
+              location.href = `/fast/lineup?${params.toString()}`;
             }}
           />
         </section>
