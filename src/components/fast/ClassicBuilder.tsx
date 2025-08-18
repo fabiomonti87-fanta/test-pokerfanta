@@ -1,403 +1,370 @@
-"use client";
+// src/components/fast/ClassicBuilder.tsx
+'use client';
 
-import React, { useMemo, useState } from "react";
-import * as XLSX from "xlsx";
-import { Search, Upload } from "lucide-react";
+import React, { useMemo, useState } from 'react';
+import * as XLSX from 'xlsx';
+import { Upload, Search } from 'lucide-react';
 
-/* =======================
-   Tipi e costanti base
-======================= */
-
-type ClassicRole = "P" | "D" | "C" | "A";
-
-type Player = {
+export type ClassicRole = 'P' | 'D' | 'C' | 'A';
+export type Player = {
   id: string;
   name: string;
   team: string;
   role: ClassicRole;
-  price: number; // FVM
+  price: number; // FVM (colonna L o header "FVM")
 };
 
-const ROLE_ORDER: ClassicRole[] = ["P", "D", "C", "A"];
-const REQUIRED_COUNTS: Record<ClassicRole, number> = { P: 3, D: 8, C: 8, A: 6 };
+type FormationKey =
+  | '3-4-3'
+  | '4-3-3'
+  | '3-5-2'
+  | '4-4-2'
+  | '4-5-1'
+  | '5-3-2'
+  | '5-4-1';
+
+const ROLE_ORDER: ClassicRole[] = ['P', 'D', 'C', 'A'];
 const ROLE_COLORS: Record<ClassicRole, string> = {
-  P: "bg-cyan-400",
-  D: "bg-green-400",
-  C: "bg-amber-400",
-  A: "bg-fuchsia-400",
+  P: 'bg-amber-500',
+  D: 'bg-emerald-500',
+  C: 'bg-sky-500',
+  A: 'bg-rose-500',
 };
-
-function normalizeRole(raw: any): ClassicRole | null {
-  const s = String(raw ?? "").trim().toLowerCase();
-  if (!s) return null;
-  if (["p", "por", "portiere"].includes(s)) return "P";
-  if (["d", "dif", "difensore"].includes(s)) return "D";
-  if (["c", "cen", "centrocampista", "med", "mezzala"].includes(s)) return "C";
-  if (["a", "att", "attaccante", "punta", "ala"].includes(s)) return "A";
-  return null;
-}
-
-function parseNumber(v: any): number {
-  if (typeof v === "number") return v;
-  if (typeof v === "string") {
-    const s = v.replace(/\./g, "").replace(",", ".").replace(/[^\d.-]/g, "");
-    const n = parseFloat(s);
-    return Number.isFinite(n) ? n : 0;
-  }
-  return 0;
-}
-
-function sum(arr: number[]) {
-  return arr.reduce((a, b) => a + b, 0);
-}
-
-/* =======================
-   Componenti UI semplici
-======================= */
-
-function StatBox({
-  title,
-  value,
-  accent = false,
-}: {
-  title: string;
-  value: number;
-  accent?: boolean;
-}) {
-  return (
-    <div className="rounded-xl bg-white/5 border border-white/10 p-4">
-      <div className="text-sm text-white/70">{title}</div>
-      <div className={`text-2xl font-bold ${accent ? "text-emerald-400" : ""}`}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function PercentInput({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <label className="block">
-      <div className="text-xs text-white/70 mb-1">{label}</div>
-      <input
-        type="number"
-        min={0}
-        max={100}
-        step={1}
-        value={value}
-        onChange={(e) => onChange(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
-        className="w-full px-3 py-2 rounded-lg bg-white/10 text-white border border-white/20 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-      />
-    </label>
-  );
-}
-
-/* =======================
-   ClassicBuilder
-======================= */
+const REQUIRED_COUNTS: Record<ClassicRole, number> = { P: 3, D: 8, C: 8, A: 6 };
 
 export default function ClassicBuilder({
-  budget = 1000,
+  budget,
+  onConfirm,
 }: {
-  budget?: number;
+  budget: number;
+  onConfirm: (team: Player[], left: number, formation: FormationKey) => void;
 }) {
-  // dataset
-  const [allPlayers, setAllPlayers] = useState<Player[]>([]);
-  const [teams, setTeams] = useState<string[]>([]);
-
-  // filtri
-  const [q, setQ] = useState("");
-  const [roleFilter, setRoleFilter] = useState<ClassicRole | "all">("all");
-  const [teamFilter, setTeamFilter] = useState<string>("all");
-
-  // rosa
+  // Stato
+  const [players, setPlayers] = useState<Player[]>([]);
   const [selected, setSelected] = useState<Player[]>([]);
-  const countByRole = useMemo(() => {
-    const m: Record<ClassicRole, number> = { P: 0, D: 0, C: 0, A: 0 };
-    for (const p of selected) m[p.role]++;
-    return m;
-  }, [selected]);
+  const [formation, setFormation] = useState<FormationKey>('3-4-3');
 
-  const spent = useMemo(() => sum(selected.map((p) => p.price)), [selected]);
-  const left = budget - spent;
+  // Filtri
+  const [q, setQ] = useState('');
+  const [roleFilter, setRoleFilter] = useState<'all' | ClassicRole>('all');
+  const [teamFilter, setTeamFilter] = useState<'all' | string>('all');
 
-  // percentuali random
-  const [pctP, setPctP] = useState(9);
-  const [pctD, setPctD] = useState(15);
-  const [pctC, setPctC] = useState(30);
-  const [pctA, setPctA] = useState(46);
+  // Distribuzione crediti (vincolante per random)
+  const [pctP, setPctP] = useState<number>(9);
+  const [pctD, setPctD] = useState<number>(15);
+  const [pctC, setPctC] = useState<number>(30);
+  const [pctA, setPctA] = useState<number>(46);
 
-  // debug card
+  // Debug box dentro "Distribuzione crediti"
   const [showDebug, setShowDebug] = useState(false);
 
-  // anti-duplicato random
-  const [lastRandomKey, setLastRandomKey] = useState("");
-
-  /* ----------------------
-     Upload Excel (FVM)
-  ----------------------- */
-  const handleExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf, { type: "array" });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<any>(ws, { defval: "" });
-
-    if (!rows.length) return;
-
-    // prova a rilevare le colonne (nome, squadra, ruolo, FVM)
-    const keys = Object.keys(rows[0]).map((k) => k.toString().toLowerCase());
-
-    const findKey = (candidates: string[]) => {
-      const hit = keys.find((k) =>
-        candidates.some((c) => k.includes(c.toLowerCase()))
-      );
-      return hit || "";
-    };
-
-    const keyName = findKey(["giocatore", "nome", "player"]);
-    const keyTeam = findKey(["squadra", "team", "club"]);
-    const keyRole = findKey(["ruolo", "r"]);
-    // usa *preferibilmente* Quotazione FVM
-    const keyFvm = findKey(["quotazione fvm", "fvm", "q fvm", "quot fvm"]);
-
-    const next: Player[] = [];
-    rows.forEach((row: any, i: number) => {
-      const rawName = keyName ? row[keyName] : row["Nome"] ?? row["Giocatore"];
-      const rawTeam = keyTeam ? row[keyTeam] : row["Squadra"];
-      const rawRole = keyRole ? row[keyRole] : row["R"] ?? row["Ruolo"];
-      // FVM preferito
-      let rawFvm: any =
-        keyFvm ? row[keyFvm] : row["Quotazione FVM"] ?? row["FVM"] ?? row["Fvm"];
-      // fallback se proprio non c'è (es. vecchi listoni)
-      if (rawFvm === undefined || rawFvm === "") {
-        rawFvm = row["Quotazione"] ?? row["Q"];
-      }
-
-      const role = normalizeRole(rawRole);
-      const name = String(rawName ?? "").trim();
-      const team = String(rawTeam ?? "").trim();
-      const price = parseNumber(rawFvm);
-
-      if (!role || !name || !team || !Number.isFinite(price)) return;
-
-      next.push({
-        id: `${role}-${name}-${team}-${i}`,
-        name,
-        team,
-        role,
-        price,
-      });
-    });
-
-    next.sort((a, b) => a.name.localeCompare(b.name, "it"));
-    setAllPlayers(next);
-    setTeams(Array.from(new Set(next.map((p) => p.team))).sort());
-    // svuota selezioni se stai ricaricando un file diverso
-    setSelected([]);
-    setLastRandomKey("");
-  };
-
-  /* ----------------------
-     Filtrati
-  ----------------------- */
+  // Derivati
+  const teams = useMemo(
+    () => Array.from(new Set(players.map((p) => p.team))).sort((a, b) => a.localeCompare(b)),
+    [players],
+  );
+  const spent = useMemo(() => selected.reduce((s, p) => s + p.price, 0), [selected]);
+  const left = Math.max(0, budget - spent);
+  const countByRole = useMemo(() => {
+    const m: Record<ClassicRole, number> = { P: 0, D: 0, C: 0, A: 0 };
+    selected.forEach((p) => (m[p.role] += 1));
+    return m;
+  }, [selected]);
+  const targets = useMemo(
+    () => ({
+      P: Math.round((budget * pctP) / 100),
+      D: Math.round((budget * pctD) / 100),
+      C: Math.round((budget * pctC) / 100),
+      A: Math.round((budget * pctA) / 100),
+    }),
+    [budget, pctP, pctD, pctC, pctA],
+  );
   const filtered = useMemo(() => {
-    const ql = q.trim().toLowerCase();
-    return allPlayers.filter((p) => {
-      if (roleFilter !== "all" && p.role !== roleFilter) return false;
-      if (teamFilter !== "all" && p.team !== teamFilter) return false;
-      if (!ql) return true;
-      return (
-        p.name.toLowerCase().includes(ql) ||
-        p.team.toLowerCase().includes(ql)
-      );
+    const used = new Set(selected.map((s) => s.id));
+    const term = q.trim().toLowerCase();
+    return players.filter((p) => {
+      if (used.has(p.id)) return false;
+      if (roleFilter !== 'all' && p.role !== roleFilter) return false;
+      if (teamFilter !== 'all' && p.team !== teamFilter) return false;
+      if (!term) return true;
+      return p.name.toLowerCase().includes(term) || p.team.toLowerCase().includes(term);
     });
-  }, [allPlayers, q, roleFilter, teamFilter]);
+  }, [players, selected, q, roleFilter, teamFilter]);
 
-  /* ----------------------
-     Aggiungi / rimuovi
-  ----------------------- */
-  const canAdd = (p: Player) => {
-    if (selected.some((x) => x.id === p.id)) return false;
-    if (left < p.price) return false;
-    const limit = REQUIRED_COUNTS[p.role];
-    if (countByRole[p.role] >= limit) return false;
-    if (selected.length >= 25) return false;
-    return true;
+  // Util
+  const roleMapToClassic = (r: string): ClassicRole | null => {
+    const R = r.toUpperCase();
+    if (['P', 'POR', 'PORTIERE'].includes(R)) return 'P';
+    if (['D', 'DC', 'DD', 'DS', 'E', 'B', 'DEF'].includes(R)) return 'D';
+    if (['C', 'M', 'T', 'MED', 'MID'].includes(R)) return 'C';
+    if (['A', 'W', 'PC', 'ATT', 'FWD'].includes(R)) return 'A';
+    return null;
+  };
+  const toNumber = (v: any) => {
+    if (typeof v === 'number') return v;
+    const n = Number(String(v ?? '').replace(',', '.').replace(/\s/g, ''));
+    return Number.isFinite(n) ? n : NaN;
   };
 
-  const add = (p: Player) => {
-    if (!canAdd(p)) return;
-    setSelected((s) => [...s, p]);
-  };
+  // Parsing Excel (colonna L = FVM se non trova header)
+  function parseExcelToPlayers(data: ArrayBuffer) {
+    const wb = XLSX.read(data, { type: 'array' });
 
-  const remove = (id: string) => {
-    setSelected((s) => s.filter((p) => p.id !== id));
-  };
+    // prova prima fogli tipo "Tutti/Quot/List", poi gli altri
+    const orderedSheets = [
+      ...wb.SheetNames.filter((n) => /tutti|quot|list/i.test(n)),
+      ...wb.SheetNames,
+    ];
 
-  const canConfirm =
-    selected.length === 25 &&
-    ROLE_ORDER.every((r) => countByRole[r] === REQUIRED_COUNTS[r]) &&
-    left >= 0;
+    for (const sn of orderedSheets) {
+      const ws = wb.Sheets[sn];
+      if (!ws) continue;
 
-  /* ----------------------
-     Randomizzatore smart
-  ----------------------- */
+      const rows: any[][] = XLSX.utils.sheet_to_json(ws, {
+        header: 1,
+        raw: true,
+        blankrows: false,
+      }) as any[][];
 
-  const randomize = () => {
-    if (!allPlayers.length) return;
+      if (!rows.length) continue;
 
-    const targets: Record<ClassicRole, number> = {
-      P: Math.round((pctP / 100) * budget),
-      D: Math.round((pctD / 100) * budget),
-      C: Math.round((pctC / 100) * budget),
-      A: Math.round((pctA / 100) * budget),
-    };
-
-    const byRole: Record<ClassicRole, Player[]> = {
-      P: [],
-      D: [],
-      C: [],
-      A: [],
-    };
-    for (const p of allPlayers) byRole[p.role].push(p);
-    ROLE_ORDER.forEach((r) => byRole[r].sort((a, b) => b.price - a.price));
-
-    const buildTeamOnce = (): Player[] => {
-      const picked: Player[] = [];
-      const spendByRole: Record<ClassicRole, number> = { P: 0, D: 0, C: 0, A: 0 };
-      const need: Record<ClassicRole, number> = { P: 3, D: 8, C: 8, A: 6 };
-
-      // 1) riempi ruolo per ruolo (mix top / mid / low)
-      ROLE_ORDER.forEach((role) => {
-        const pool = byRole[role];
-        const topEnd = Math.max(1, Math.floor(pool.length * 0.25));
-        const midEnd = Math.max(topEnd + 1, Math.floor(pool.length * 0.65));
-
-        for (let i = 0; i < need[role]; i++) {
-          let cand: Player | undefined;
-          const r = Math.random();
-          if (r < 0.4) cand = pool[Math.floor(Math.random() * topEnd)];
-          else if (r < 0.8)
-            cand =
-              pool[topEnd + Math.floor(Math.random() * Math.max(1, midEnd - topEnd))];
-          else
-            cand =
-              pool[
-                midEnd + Math.floor(Math.random() * Math.max(1, pool.length - midEnd))
-              ];
-
-          if (!cand) {
-            i--;
-            continue;
-          }
-          if (picked.some((x) => x.id === cand!.id)) {
-            i--;
-            continue;
-          }
-          picked.push(cand);
-          spendByRole[role] += cand.price;
-        }
-      });
-
-      // 2) se sfora budget -> downgrade mirati
-      let total = sum(picked.map((p) => p.price));
-      if (total > budget) {
-        let over = total - budget;
-        for (let guard = 0; guard < 200 && over > 0; guard++) {
-          // ruolo più sopra al target
-          const role = ROLE_ORDER.sort(
-            (a, b) => (spendByRole[a] - targets[a]) - (spendByRole[b] - targets[b])
-          ).pop() as ClassicRole;
-
-          const inRole = picked
-            .filter((p) => p.role === role)
-            .sort((a, b) => b.price - a.price);
-          const victim = inRole[0];
-          if (!victim) break;
-
-          const pool = byRole[role];
-          const cheaper = pool
-            .slice()
-            .reverse()
-            .find(
-              (q) => q.price < victim.price && !picked.some((x) => x.id === q.id)
-            );
-          if (!cheaper) break;
-
-          const idx = picked.findIndex((x) => x.id === victim.id);
-          picked[idx] = cheaper;
-          spendByRole[role] += cheaper.price - victim.price;
-          over -= victim.price - cheaper.price;
-          total -= victim.price - cheaper.price;
+      // trova la riga header nelle prime 40
+      let hi = -1;
+      for (let i = 0; i < Math.min(40, rows.length); i++) {
+        const r = rows[i]?.map((x) => String(x ?? '').trim().toLowerCase()) ?? [];
+        const hasNome = r.includes('nome') || r.includes('giocatore') || r.includes('calciatore');
+        const hasSquadra = r.includes('squadra') || r.includes('team') || r.includes('club');
+        const hasR = r.includes('r') || r.includes('ruolo') || r.includes('rm') || r.includes('ruolo mantra');
+        const hasFvm = r.includes('fvm') || r.includes('fvm m') || r.includes('quotazione fvm');
+        if (hasNome && hasSquadra && hasR && (hasFvm || true)) {
+          hi = i;
+          break;
         }
       }
+      if (hi < 0) continue;
 
-      // 3) se avanza -> upgrade finché possibile (lascia <= 2 crediti)
-      let leftLocal = budget - sum(picked.map((p) => p.price));
-      for (let guard = 0; guard < 300 && leftLocal > 2; guard++) {
-        const role = ROLE_ORDER.sort(
-          (a, b) => (targets[a] - spendByRole[a]) - (targets[b] - spendByRole[b])
-        )[0];
+      const header = rows[hi].map((h) => String(h ?? '').trim().toLowerCase());
+      const findIdx = (labels: string[]) => header.findIndex((h) => labels.includes(h));
 
-        const inRole = picked
-          .map((p, i) => ({ p, i }))
-          .filter((x) => x.p.role === role)
-          .sort((a, b) => a.p.price - b.p.price);
+      const idxR = findIdx(['r', 'ruolo']);
+      const idxRM = findIdx(['rm', 'ruolo mantra', 'mantra']);
+      const idxNome = findIdx(['nome', 'giocatore', 'calciatore']);
+      const idxTeam = findIdx(['squadra', 'team', 'club']);
+      let idxFVM = findIdx(['fvm', 'fvm m', 'quotazione fvm']);
+      if (idxFVM < 0) idxFVM = 11; // fallback: colonna L
 
-        if (!inRole.length) break;
-        const idx = inRole[0].i;
-        const current = picked[idx];
+      const out: Player[] = [];
+      for (let i = hi + 1; i < rows.length; i++) {
+        const r = rows[i];
+        if (!r) continue;
 
-        const pool = byRole[role];
-        const upgrade = pool.find(
-          (q) =>
-            q.price > current.price &&
-            q.price <= current.price + leftLocal &&
-            !picked.some((x) => x.id === q.id)
-        );
-        if (!upgrade) break;
+        const name = String(r[idxNome] ?? '').trim();
+        const team = String(r[idxTeam] ?? '').trim();
+        const roleRaw = String((idxR >= 0 ? r[idxR] : r[idxRM]) ?? '').trim();
+        const role: ClassicRole | null =
+          idxR >= 0 && ['P', 'D', 'C', 'A'].includes(roleRaw.toUpperCase())
+            ? (roleRaw.toUpperCase() as ClassicRole)
+            : roleMapToClassic(roleRaw);
+        const price = toNumber(r[idxFVM]);
 
-        picked[idx] = upgrade;
-        spendByRole[role] += upgrade.price - current.price;
-        leftLocal -= upgrade.price - current.price;
+        if (!name || !team || !role || !Number.isFinite(price) || price <= 0) continue;
+
+        out.push({
+          id: `${role}-${name}-${team}`.replace(/\s+/g, '_'),
+          name,
+          team,
+          role,
+          price: Math.round(price),
+        });
       }
 
-      return picked;
-    };
-
-    const MAX_TRIES = 8;
-    for (let t = 0; t < MAX_TRIES; t++) {
-      const team = buildTeamOnce();
-      const key = team
-        .map((p) => p.id)
-        .sort()
-        .join("-");
-      if (key !== lastRandomKey || t === MAX_TRIES - 1) {
-        setSelected(team);
-        setLastRandomKey(key);
+      if (out.length) {
+        out.sort((a, b) => b.price - a.price);
+        setPlayers(out);
+        setSelected([]);
+        setQ('');
+        setRoleFilter('all');
+        setTeamFilter('all');
         return;
       }
     }
-  };
 
-  /* ----------------------
-     Render
-  ----------------------- */
+    alert(
+      'Impossibile leggere il listone.\n' +
+        'Controlla che il file abbia le colonne: Ruolo/RM, Nome, Squadra e FVM (o FVM in colonna L).',
+    );
+  }
 
+  function handleExcel(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        parseExcelToPlayers(ev.target?.result as ArrayBuffer);
+      } catch (err) {
+        console.error(err);
+        alert('Errore durante la lettura del file. Assicurati che sia un .xlsx valido.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    // resetta l’input per poter ricaricare lo stesso file
+    e.currentTarget.value = '';
+  }
+
+  // Add/Remove
+  function canAdd(p: Player) {
+    if ((countByRole[p.role] ?? 0) >= REQUIRED_COUNTS[p.role]) return false; // limite per ruolo
+    if (p.price > left) return false; // budget
+    if (selected.length >= 25) return false; // 25 totali
+    return true;
+  }
+  function add(p: Player) {
+    if (!canAdd(p)) return;
+    setSelected((prev) => [...prev, p]);
+  }
+  function remove(id: string) {
+    setSelected((prev) => prev.filter((x) => x.id !== id));
+  }
+
+  // Randomizzatore (rispetta le % per ruolo)
+  function randomize() {
+    if (!players.length) return;
+
+    const targetByRole: Record<ClassicRole, number> = {
+      P: Math.round((budget * pctP) / 100),
+      D: Math.round((budget * pctD) / 100),
+      C: Math.round((budget * pctC) / 100),
+      A: Math.round((budget * pctA) / 100),
+    };
+
+    const poolByRole: Record<ClassicRole, Player[]> = { P: [], D: [], C: [], A: [] };
+    players.forEach((p) => poolByRole[p.role].push(p));
+    ROLE_ORDER.forEach((r) => poolByRole[r].sort((a, b) => b.price - a.price));
+
+    const pickRole = (r: ClassicRole) => {
+      const need = REQUIRED_COUNTS[r];
+      const target = targetByRole[r];
+      const pool = poolByRole[r];
+      if (!pool.length) return [] as Player[];
+
+      const out: Player[] = [];
+      let spentR = 0;
+      const avgMax = Math.floor(target / need);
+
+      // 1) prendo 1–2 “buoni” senza sforare
+      for (const p of pool) {
+        if (out.length >= Math.min(2, need)) break;
+        if (p.price <= Math.max(avgMax + 10, 5) && spentR + p.price <= target) {
+          if (!out.find((x) => x.id === p.id)) {
+            out.push(p);
+            spentR += p.price;
+          }
+        }
+      }
+
+      // 2) riempi mantenendo media sostenibile
+      while (out.length < need) {
+        const remain = need - out.length;
+        const budgetLeft = target - spentR;
+        const maxForThis = Math.max(Math.floor(budgetLeft / remain), 1) + 3;
+
+        const cand =
+          pool.find(
+            (p) =>
+              !out.find((x) => x.id === p.id) &&
+              p.price <= maxForThis &&
+              spentR + p.price <= target,
+          ) ||
+          pool
+            .slice()
+            .reverse()
+            .find(
+              (p) =>
+                !out.find((x) => x.id === p.id) &&
+                spentR + p.price <= target + 2, // piccola tolleranza
+            );
+
+        if (!cand) break;
+        out.push(cand);
+        spentR += cand.price;
+      }
+
+      // 3) completa con i più economici
+      let idx = pool.length - 1;
+      while (out.length < need && idx >= 0) {
+        const p = pool[idx--];
+        if (out.find((x) => x.id === p.id)) continue;
+        out.push(p);
+        spentR += p.price;
+      }
+
+      // 4) se sfora troppo, sostituisci il più caro con uno più economico
+      let guard = 0;
+      while (spentR > target + 2 && guard < 40) {
+        guard++;
+        const maxIdx = out.reduce((mi, x, i) => (x.price > out[mi].price ? i : mi), 0);
+        const cheapest = pool
+          .slice()
+          .reverse()
+          .find(
+            (p) =>
+              !out.find((x) => x.id === p.id) &&
+              spentR - out[maxIdx].price + p.price <= target + 2,
+          );
+        if (!cheapest) break;
+        spentR = spentR - out[maxIdx].price + cheapest.price;
+        out[maxIdx] = cheapest;
+      }
+
+      return out;
+    };
+
+    const teamPicked = [...pickRole('P'), ...pickRole('D'), ...pickRole('C'), ...pickRole('A')].slice(
+      0,
+      25,
+    );
+
+    setSelected(teamPicked);
+  }
+
+  // Conferma
+  const canConfirm =
+    selected.length === 25 &&
+    ROLE_ORDER.every((r) => countByRole[r] === REQUIRED_COUNTS[r]) &&
+    spent <= budget;
+
+  function getPct(r: ClassicRole) {
+    return r === 'P' ? pctP : r === 'D' ? pctD : r === 'C' ? pctC : pctA;
+  }
+
+  function confirmTeam() {
+    if (!canConfirm) return;
+    onConfirm(selected, left, formation);
+  }
+
+  // UI
   return (
     <div className="space-y-4">
-      {/* Header: ricerca + filtri + upload */}
+      {/* Header riga: modulo + ricerca/filtri/carica */}
       <div className="flex flex-wrap items-center gap-3">
+        <div className="text-sm">
+          <label className="text-white/80 mr-2">Modulo</label>
+          <select
+            value={formation}
+            onChange={(e) => setFormation(e.target.value as FormationKey)}
+            className="px-2 py-1 rounded-md bg-emerald-600/15 border border-emerald-500/30 text-white"
+          >
+            <option value="3-4-3">3-4-3</option>
+            <option value="4-3-3">4-3-3</option>
+            <option value="3-5-2">3-5-2</option>
+            <option value="4-4-2">4-4-2</option>
+            <option value="4-5-1">4-5-1</option>
+            <option value="5-3-2">5-3-2</option>
+            <option value="5-4-1">5-4-1</option>
+          </select>
+        </div>
+
         {/* Search */}
         <div className="relative flex-1 min-w-[220px]">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-white/60" />
@@ -440,30 +407,23 @@ export default function ClassicBuilder({
         <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 cursor-pointer">
           <Upload className="h-4 w-4" />
           <span>Carica Excel</span>
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={handleExcel}
-          />
+          <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleExcel} />
         </label>
       </div>
 
-      {/* Riga 2: Distribuzione + Random */}
+      {/* Riga 2: Distribuzione crediti + Randomizzatore */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {/* Distribuzione crediti (debug interno) */}
+        {/* Distribuzione crediti (con DEBUG dentro) */}
         <div className="rounded-xl bg-emerald-700/25 border border-emerald-500/30">
           <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-            <div className="font-semibold">
-              Distribuzione crediti % (vincolante per il random)
-            </div>
+            <div className="font-semibold">Distribuzione crediti % (vincolante per il random)</div>
             <button
               type="button"
               onClick={() => setShowDebug((v) => !v)}
               className="px-2 py-1 rounded-md bg-white/10 text-white hover:bg-white/15 text-xs"
               title="Mostra/Nascondi debug budget per ruolo"
             >
-              {showDebug ? "Nascondi debug" : "Mostra debug"}
+              {showDebug ? 'Nascondi debug' : 'Mostra debug'}
             </button>
           </div>
 
@@ -476,32 +436,19 @@ export default function ClassicBuilder({
 
           {showDebug && (
             <div className="px-4 pb-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-              {ROLE_ORDER.map((r) => {
-                const target =
-                  Math.round(
-                    ((r === "P" ? pctP : r === "D" ? pctD : r === "C" ? pctC : pctA) /
-                      100) *
-                      budget
-                  ) || 0;
-                const spentRole = selected
-                  .filter((p) => p.role === r)
-                  .reduce((s, p) => s + p.price, 0);
-                const pct =
-                  Math.round((spentRole / Math.max(1, budget)) * 1000) / 10;
-                return (
-                  <div
-                    key={r}
-                    className="rounded-lg bg-white/10 border border-white/10 p-3"
-                  >
-                    <div className="text-xs text-white/70">Ruolo {r}</div>
-                    <div className="text-lg font-semibold">{target}</div>
-                    <div className="text-xs">
-                      Spesi <span className="font-semibold">{spentRole}</span>{" "}
-                      <span className="text-white/60">• ({pct}%)</span>
-                    </div>
+              {ROLE_ORDER.map((r) => (
+                <div key={r} className="rounded-lg bg-white/10 border border-white/10 p-3">
+                  <div className="text-xs text-white/70">Ruolo {r}</div>
+                  <div className="text-lg font-semibold">{targets[r]}</div>
+                  <div className="text-xs">
+                    Spesi{' '}
+                    <span className="font-semibold">
+                      {selected.filter((p) => p.role === r).reduce((s, p) => s + p.price, 0)}
+                    </span>
+                    <span className="text-white/60"> • ({getPct(r)}%)</span>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -510,36 +457,27 @@ export default function ClassicBuilder({
         <div className="rounded-xl bg-white/5 border border-white/10 p-4">
           <div className="font-semibold mb-2">Randomizzatore (smart)</div>
           <p className="text-sm text-white/70 mb-3">
-            Crea una rosa rispettando le percentuali per ruolo, prova a usare
-            quasi tutto il budget (rimasto ≤ 2), e rispetta i limiti 3P/8D/8C/6A.
+            Crea una rosa rispettando le percentuali per ruolo, prova a usare quasi tutto il budget,
+            e rispetta i limiti 3P/8D/8C/6A.
           </p>
           <div className="flex items-center gap-2">
-            <button
-              onClick={randomize}
-              className="px-3 py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-700"
-            >
+            <button onClick={randomize} className="px-3 py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-700">
               🎲 Randomizza (rispetta % ruolo)
             </button>
-            <button
-              onClick={() => setSelected([])}
-              className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15"
-            >
+            <button onClick={() => setSelected([])} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15">
               Svuota rosa
             </button>
           </div>
         </div>
       </div>
 
-      {/* Riepiloghi */}
+      {/* Stat riquadri */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <StatBox title="Budget" value={budget} />
         <StatBox title="Speso" value={spent} />
         <StatBox title="Rimanente" value={left} accent />
         {ROLE_ORDER.map((r) => (
-          <div
-            key={r}
-            className="rounded-xl bg-white/5 border border-white/10 p-4 flex items-center justify-between"
-          >
+          <div key={r} className="rounded-xl bg-white/5 border border-white/10 p-4 flex items-center justify-between">
             <div>
               <div className="text-sm text-white/70">Ruolo {r}</div>
               <div className="text-xl font-semibold">
@@ -555,27 +493,18 @@ export default function ClassicBuilder({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {/* Elenco */}
         <div className="rounded-xl bg-white/5 border border-white/10">
-          <div className="px-4 py-3 border-b border-white/10 font-semibold">
-            Listone (FVM)
-          </div>
+          <div className="px-4 py-3 border-b border-white/10 font-semibold">Listone (FVM)</div>
           <div className="max-h-[520px] overflow-auto divide-y divide-white/10">
             {filtered.length === 0 ? (
-              <div className="p-4 text-sm text-white/70">
-                Nessun giocatore trovato. Carica l’Excel o modifica i filtri.
-              </div>
+              <div className="p-4 text-sm text-white/70">Nessun giocatore trovato. Carica l’Excel o modifica i filtri.</div>
             ) : (
               filtered.map((p) => (
-                <div
-                  key={p.id}
-                  className="px-4 py-2 flex items-center justify-between"
-                >
+                <div key={p.id} className="px-4 py-2 flex items-center justify-between">
                   <div className="min-w-0">
                     <div className="font-medium truncate">
                       {p.name} <span className="text-white/60">({p.team})</span>
                     </div>
-                    <div className="text-xs text-white/70">
-                      Ruolo {p.role} • FVM {p.price}
-                    </div>
+                    <div className="text-xs text-white/70">Ruolo {p.role} • FVM {p.price}</div>
                   </div>
                   <button
                     disabled={!canAdd(p)}
@@ -592,31 +521,20 @@ export default function ClassicBuilder({
 
         {/* Rosa */}
         <div className="rounded-xl bg-white/5 border border-white/10 flex flex-col">
-          <div className="px-4 py-3 border-b border-white/10 font-semibold">
-            La tua rosa ({selected.length}/25)
-          </div>
+          <div className="px-4 py-3 border-b border-white/10 font-semibold">La tua rosa ({selected.length}/25)</div>
           <div className="flex-1 max-h-[420px] overflow-auto divide-y divide-white/10">
             {selected.length === 0 ? (
-              <div className="p-4 text-sm text-white/70">
-                Nessun giocatore selezionato.
-              </div>
+              <div className="p-4 text-sm text-white/70">Nessun giocatore selezionato.</div>
             ) : (
               selected.map((p) => (
-                <div
-                  key={p.id}
-                  className="px-4 py-2 flex items-center justify-between"
-                >
+                <div key={p.id} className="px-4 py-2 flex items-center justify-between">
                   <div className="min-w-0">
                     <div className="font-medium truncate">
-                      {p.role} • {p.name}{" "}
-                      <span className="text-white/60">({p.team})</span>
+                      {p.role} • {p.name} <span className="text-white/60">({p.team})</span>
                     </div>
                     <div className="text-xs text-white/70">FVM {p.price}</div>
                   </div>
-                  <button
-                    onClick={() => remove(p.id)}
-                    className="px-2 py-1 rounded-md bg-white/10 hover:bg-white/15"
-                  >
+                  <button onClick={() => remove(p.id)} className="px-2 py-1 rounded-md bg-white/10 hover:bg-white/15">
                     Rimuovi
                   </button>
                 </div>
@@ -633,7 +551,7 @@ export default function ClassicBuilder({
             </ul>
             <button
               disabled={!canConfirm}
-              onClick={() => alert("Rosa confermata (demo).")}
+              onClick={confirmTeam}
               className="w-full px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Conferma rosa
@@ -645,10 +563,53 @@ export default function ClassicBuilder({
       {/* Footer budget */}
       <div className="flex items-center justify-between pt-2">
         <div className="text-sm text-white/80">
-          Budget: <span className="font-semibold">{budget}</span> • Rimasti:{" "}
+          Budget: <span className="font-semibold">{budget}</span> • Rimasti:{' '}
           <span className="font-semibold text-emerald-400">{left}</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ---------- piccoli componenti UI ---------- */
+function StatBox({
+  title,
+  value,
+  accent = false,
+}: {
+  title: string;
+  value: number;
+  accent?: boolean;
+}) {
+  return (
+    <div className="rounded-xl bg-white/5 border border-white/10 p-4">
+      <div className="text-sm text-white/70">{title}</div>
+      <div className={`text-2xl font-bold ${accent ? 'text-emerald-400' : ''}`}>{value}</div>
+    </div>
+  );
+}
+
+function PercentInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="rounded-lg bg-white/10 border border-white/10 p-3">
+      <div className="text-sm mb-1">{label}</div>
+      <input
+        type="number"
+        min={0}
+        max={100}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value || 0))}
+        className="w-full px-2 py-1 rounded-md bg-white/90 text-slate-900"
+      />
     </div>
   );
 }
