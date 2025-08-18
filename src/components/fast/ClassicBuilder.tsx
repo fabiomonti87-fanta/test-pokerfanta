@@ -91,6 +91,7 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
   const [teamFilter, setTeamFilter] = useState<string>('ALL');
   const [uploadMsg, setUploadMsg] = useState<string>('');
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const [showDebug, setShowDebug] = useState<boolean>(true);
 
   // Distribuzione — VINCOLA davvero il randomizzatore
   const [dist, setDist] = useState<Dist>({ P: 9, D: 15, C: 30, A: 46 });
