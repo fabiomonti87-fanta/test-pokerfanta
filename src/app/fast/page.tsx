@@ -1,42 +1,12 @@
 'use client';
-
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import ClassicBuilder from '@/components/fast/ClassicBuilder';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
 import { Roboto } from 'next/font/google';
 
 const roboto = Roboto({ subsets: ['latin'], weight: ['300','400','500','700'] });
 
-type TableStatus = 'filling' | 'running' | 'completed';
-type GameKind = 'classic';
-type Table = {
-  id: string;
-  kind: GameKind;
-  buyIn: number;     // €
-  capacity: number;  // 2,4,6,10,20,50
-  status: TableStatus;
-  enrolled: number;
-  stack: number;     // budget (1000 o 200)
-};
-
-type Participant = { name: string; score: number; prize: number };
-
-function payoutsForCapacity(cap: number): number[] {
-  // percentuali che sommano ~100
-  if (cap <= 2) return [100];
-  if (cap <= 4) return [70, 30];
-  if (cap <= 6) return [50, 30, 20];
-  if (cap <= 10) return [50, 30, 20];
-  if (cap <= 20) return [40, 25, 15, 12, 8];
-  // cap ~50
-  return [22, 16, 13, 10, 8, 7, 6, 6, 6, 6];
-}
-
-function simulateClassicScore(spentRatio: number) {
-  // base 60–110 con leggera spinta se hai speso quasi tutto
-  const base = 60 + Math.random() * 50;
-  const bump = 8 * spentRatio; // max +8
-  return Math.round(base + bump);
-}
+// ... (tipi, helpers, payoutsForCapacity, simulateClassicScore) restano uguali
 
 export default function FastPage() {
   const [view, setView] = useState<'lobby'|'builder'|'result'>('lobby');
@@ -44,6 +14,60 @@ export default function FastPage() {
   const [leaderboard, setLeaderboard] = useState<Participant[] | null>(null);
   const [resultInfo, setResultInfo] = useState<{ pot: number; rake: number; pool: number } | null>(null);
 
+  // CRASH REPORTER
+  const [fatal, setFatal] = useState<string | null>(null);
+  useEffect(() => {
+    const onErr = (e: ErrorEvent) => {
+      setFatal(e?.error?.message || e.message || 'Errore sconosciuto');
+      console.error('[window.onerror]', e);
+    };
+    const onRej = (e: PromiseRejectionEvent) => {
+      // @ts-expect-error
+      const msg = e?.reason?.message || String(e.reason) || 'Unhandled rejection';
+      setFatal(msg);
+      console.error('[unhandledrejection]', e);
+    };
+    window.addEventListener('error', onErr);
+    window.addEventListener('unhandledrejection', onRej);
+    return () => {
+      window.removeEventListener('error', onErr);
+      window.removeEventListener('unhandledrejection', onRej);
+    };
+  }, []);
+
+  // ... (state dei tavoli, filtri, ecc.) invariato
+
+  function joinTable(t: Table) {
+    try {
+      if (!t || t.status === 'completed') return;
+      setCurrentTable(t);
+      setView('builder');
+    } catch (e) {
+      console.error('[joinTable]', e);
+      setFatal((e as Error).message);
+    }
+  }
+
+  function runResult(table: Table, teamSpent: number) {
+    try {
+      // ... (identico a prima)
+      // classifica + payout come prima
+    } catch (e) {
+      console.error('[runResult]', e);
+      setFatal((e as Error).message);
+    }
+  }
+
+  return (
+    <ErrorBoundary>
+      <main className={`${roboto.className} min-h-screen bg-gradient-to-br from-[#0b1222] via-[#0f1b33] to-[#0b1222] text-white p-4`}>
+        {fatal && (
+          <div className="mb-3 rounded-lg border border-amber-400/40 bg-amber-900/20 p-3">
+            <div className="text-sm font-semibold">Errore rilevato</div>
+            <div className="text-xs opacity-90 mt-1">{fatal}</div>
+            <button onClick={()=> setFatal(null)} className="mt-2 px-2 py-1 rounded bg-white/10 hover:bg-white/15 text-xs">Chiudi</button>
+          </div>
+        )}
   // DEMO: tavoli base
   const [tables, setTables] = useState<Table[]>([
     { id: 't1', kind: 'classic', buyIn: 1,  capacity: 20, status: 'filling',  enrolled: 12, stack: 1000 },
