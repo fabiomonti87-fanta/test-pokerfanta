@@ -43,6 +43,31 @@ function MiniSelect({
 
   const current = options.find((o) => o.value === value)?.label ?? 'Seleziona';
 
+// ...dentro ClassicBuilder(...)
+const [showDebug, setShowDebug] = useState(true); // puoi metterlo false se non vuoi mostrarlo di default
+
+// calcolo budget target per ruolo in base alle percentuali correnti
+const roleBudgetTarget = useMemo(() => {
+  const total = budget;
+  const p = Math.round(total * (dist.P / 100));
+  const d = Math.round(total * (dist.D / 100));
+  const c = Math.round(total * (dist.C / 100));
+  const a = total - (p + d + c); // chiusura su A
+  return { P: p, D: d, C: c, A: a } as Record<ClassicRole, number>;
+}, [budget, dist]);
+
+// spesa live per ruolo nella rosa selezionata
+const roleSpentLive = useMemo(() => {
+  return selected.reduce(
+    (acc, cur) => {
+      acc[cur.role] += cur.price;
+      return acc;
+    },
+    { P: 0, D: 0, C: 0, A: 0 } as Record<ClassicRole, number>
+  );
+}, [selected]);
+
+  
   return (
     <div ref={ref} className={`relative ${className}`}>
       <button
@@ -450,6 +475,35 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
           </button>
           <input type="file" ref={fileRef} accept=".xlsx,.xls" className="hidden" onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])} />
           {uploadMsg && <div className="text-xs text-emerald-200/90 bg-emerald-900/30 border border-emerald-500/30 rounded-md px-2 py-1">{uploadMsg}</div>}
+          {/* Toggle debug */}
+<button
+  type="button"
+  onClick={() => setShowDebug(v => !v)}
+  className="px-2 py-1 rounded-md bg-white/10 text-white hover:bg-white/15 text-xs"
+  title="Mostra/Nascondi debug budget per ruolo"
+>
+  {showDebug ? 'Nascondi debug' : 'Mostra debug'}
+</button>
+
+{/* Badge debug budget/ruolo */}
+{showDebug && (
+  <div className="ml-2 inline-flex items-center gap-2 rounded-lg px-2 py-1 border border-emerald-400/30 bg-emerald-900/30 text-emerald-100 text-xs">
+    {(['P','D','C','A'] as ClassicRole[]).map(r => {
+      const spent = roleSpentLive[r];
+      const cap = roleBudgetTarget[r];
+      const over = spent > cap;
+      return (
+        <span key={r} className="inline-flex items-center gap-1">
+          <span className="px-1 py-0.5 rounded bg-white/10 text-white">{r}</span>
+          <span className={over ? 'text-rose-300 font-semibold' : 'text-emerald-200'}>
+            {spent}/{cap}
+          </span>
+        </span>
+      );
+    })}
+  </div>
+)}
+
         </div>
       </div>
 
