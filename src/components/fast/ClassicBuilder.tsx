@@ -429,7 +429,7 @@ function handleExcel(e: React.ChangeEvent<HTMLInputElement>) {
   }
 
   // -------------------- UI --------------------
-  return (
+return (
     <div className="space-y-4">
       {/* Header riga: modulo + ricerca/filtri/carica */}
       <div className="flex flex-wrap items-center gap-3">
@@ -439,7 +439,7 @@ function handleExcel(e: React.ChangeEvent<HTMLInputElement>) {
             value={formation}
             onChange={(e) => setFormation(e.target.value as FormationKey)}
             className="px-2 py-1 rounded-md bg-emerald-600/15 border border-emerald-500/30 text-white"
-          >
+        >
             <option value="3-4-3">3-4-3</option>
             <option value="4-3-3">4-3-3</option>
             <option value="3-5-2">3-5-2</option>
@@ -713,7 +713,7 @@ function handleExcel(e: React.ChangeEvent<HTMLInputElement>) {
         </div>
       </div>
     </div>
-  );
+ );
 
   function getPct(r: ClassicRole) {
     return r === 'P' ? pctP : r === 'D' ? pctD : r === 'C' ? pctC : pctA;
