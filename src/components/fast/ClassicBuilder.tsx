@@ -16,7 +16,7 @@ type Props = {
   onConfirm: (team: Player[], budgetLeft: number) => void;
 };
 
-/** Mini select custom per palette scura (niente menù bianco di sistema) */
+/** Mini select custom per palette scura */
 function MiniSelect({
   value,
   options,
@@ -92,7 +92,7 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
   const [uploadMsg, setUploadMsg] = useState<string>('');
   const fileRef = useRef<HTMLInputElement | null>(null);
 
-  // Distribuzione — adesso è *vincolante* per il randomizzatore
+  // Distribuzione — VINCOLA davvero il randomizzatore
   const [dist, setDist] = useState<Dist>({ P: 9, D: 15, C: 30, A: 46 });
 
   const budgetUsed = useMemo(() => selected.reduce((s, p) => s + p.price, 0), [selected]);
@@ -143,7 +143,7 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
     }
   };
 
-  // ---------- Randomizzazione SMART (usa *davvero* la distribuzione dist) ----------
+  // ---------- Randomizzazione SMART (rispetta % ruolo) ----------
   function percentile(vals: number[], p: number): number {
     if (!vals.length) return 0;
     const v = [...vals].sort((a, b) => a - b);
@@ -163,9 +163,9 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
     let P = Math.round(total * (dist.P / 100));
     let D = Math.round(total * (dist.D / 100));
     let C = Math.round(total * (dist.C / 100));
-    let A = total - (P + D + C); // chiusura arrotondamenti su A
+    let A = total - (P + D + C); // chiusura su A
 
-    // minimi “di sicurezza” per tavoli low stack
+    // minimi di sicurezza (stack bassi)
     const min = {
       P: Math.max(12, Math.floor(total * 0.05)),
       D: Math.max(30, Math.floor(total * 0.10)),
@@ -194,33 +194,6 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
     const rot = roleList.filter((p) => p.price < p40);
     return { top, sec, rot };
   }
-  function pickClosestUnder(pool: Player[], target: number, used: Set<string>): Player | null {
-    const cand = pool.filter((p) => !used.has(p.id) && p.price <= target);
-    if (cand.length) return cand.reduce((a, b) => (Math.abs(b.price - target) < Math.abs(a.price - target) ? b : a));
-    const rest = pool.filter((p) => !used.has(p.id));
-    return rest.length ? rest[0] : null;
-  }
-  function tryUpgrade(team: Player[], poolSameRole: Player[], budgetLeft: number): { team: Player[]; spent: number } {
-    const used = new Set(team.map((t) => t.id));
-    let bestIdx = -1;
-    let bestSwap: Player | null = null;
-    let bestDelta = 0;
-    team.forEach((pl, i) => {
-      const better = poolSameRole
-        .filter((p) => !used.has(p.id) && p.price > pl.price && p.price - pl.price <= budgetLeft + 0.01)
-        .sort((a, b) => b.price - a.price)[0];
-      if (better && better.price - pl.price > bestDelta) {
-        bestDelta = better.price - pl.price;
-        bestSwap = better; bestIdx = i;
-      }
-    });
-    if (bestIdx >= 0 && bestSwap) {
-      const next = [...team]; next[bestIdx] = bestSwap;
-      const spent = next.reduce((s, p) => s + p.price, 0);
-      return { team: next, spent };
-    }
-    return { team, spent: team.reduce((s, p) => s + p.price, 0) };
-  }
 
   function randomizeSmart() {
     if (!players.length) {
@@ -229,6 +202,12 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
     }
     const byRole = groupByRole(players);
     const budgets = roleBudgets(budget);
+    const minPrice: Record<ClassicRole, number> = {
+      P: byRole.P[0]?.price ?? 1,
+      D: byRole.D[0]?.price ?? 1,
+      C: byRole.C[0]?.price ?? 1,
+      A: byRole.A[0]?.price ?? 1,
+    };
     const cats = {
       P: categorize(byRole.P),
       D: categorize(byRole.D),
@@ -238,55 +217,140 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
     const need = countsByCategory();
     const used = new Set<string>();
     const team: Player[] = [];
+    const roleSpent: Record<ClassicRole, number> = { P: 0, D: 0, C: 0, A: 0 };
 
     function targetsForRole(r: ClassicRole, totalRoleBudget: number) {
       const avg = totalRoleBudget / Math.max(1, TARGET[r]);
       return { top: 1.6 * avg, sec: 1.0 * avg, rot: 0.6 * avg };
     }
 
-    // Portieri: prova tripletta stessa squadra
+    function pickUnderCap(r: ClassicRole, pool: Player[], target: number, remainingAfterPick: number): Player | null {
+      // cap dinamico: non intaccare i minimi per i posti restanti
+      const reserve = minPrice[r] * Math.max(0, remainingAfterPick);
+      let cap = Math.min(target, budgets[r] - roleSpent[r] - reserve);
+      cap = Math.max(minPrice[r], cap);
+      const cand = pool.filter((p) => !used.has(p.id) && p.price <= cap);
+      if (cand.length) {
+        // il più vicino al target
+        return cand.reduce((a, b) => (Math.abs(b.price - cap) < Math.abs(a.price - cap) ? b : a));
+      }
+      // fallback: il più economico che non rompe i minimi (se possibile)
+      const cheap = pool
+        .filter((p) => !used.has(p.id))
+        .sort((a, b) => a.price - b.price)
+        .find((p) => roleSpent[r] + p.price + minPrice[r] * (remainingAfterPick) <= budgets[r]);
+      if (cheap) return cheap;
+
+      // ultimissimo fallback: qualunque non usato (potrebbe sforare di pochissimo, verrà corretto in enforcement)
+      return pool.find((p) => !used.has(p.id)) ?? null;
+    }
+
+    function addToTeam(p: Player) {
+      used.add(p.id);
+      team.push(p);
+      roleSpent[p.role] += p.price;
+    }
+
+    // Portieri: prova tripletta stessa squadra, rispettando il cap ruolo
     (function buildP() {
       const { top, sec } = cats.P;
       const t = targetsForRole('P', budgets.P);
       const byTeam = byRole.P.reduce((m, p) => ((m[p.team] = m[p.team] || []).push(p), m), {} as Record<string, Player[]>);
       const triple = Object.values(byTeam).find((arr) => arr.length >= 3);
       if (triple) {
-        [...triple].sort((a, b) => b.price - a.price).slice(0, 3).forEach((p) => { used.add(p.id); team.push(p); });
-      } else {
-        const p1 = pickClosestUnder(top, t.top, used) || pickClosestUnder(byRole.P, t.top, used);
-        if (p1) { used.add(p1.id); team.push(p1); }
-        for (let i = 0; i < 2; i++) {
-          const p = pickClosestUnder(sec, t.sec, used) || pickClosestUnder(byRole.P, t.sec, used);
-          if (p) { used.add(p.id); team.push(p); }
+        const sorted = [...triple].sort((a, b) => b.price - a.price);
+        for (let i = 0; i < 3; i++) {
+          const rem = (3 - (i + 1));
+          const capPick = pickUnderCap('P', sorted, i === 0 ? t.top : t.sec, rem);
+          if (capPick) addToTeam(capPick);
         }
+      }
+      // se non bastano i 3, integra dai pool
+      while (team.filter((x) => x.role === 'P').length < TARGET.P) {
+        const left = TARGET.P - team.filter((x) => x.role === 'P').length;
+        const capPick =
+          pickUnderCap('P', top, t.top, left - 1) ||
+          pickUnderCap('P', sec, t.sec, left - 1) ||
+          pickUnderCap('P', byRole.P, t.sec, left - 1);
+        if (capPick) addToTeam(capPick);
+        else break;
       }
     })();
 
     (['D', 'C', 'A'] as ClassicRole[]).forEach((r) => {
       const { top, sec, rot } = cats[r];
       const t = targetsForRole(r, budgets[r]);
-      const take = (pool: Player[], n: number, target: number) => {
-        for (let i = 0; i < n; i++) {
-          const p =
-            pickClosestUnder(pool, target * (1 + Math.random() * 0.15), used) ||
-            pickClosestUnder(byRole[r], target, used);
-          if (p) { used.add(p.id); team.push(p); }
+      const plan: Array<{ pool: Player[]; n: number; target: number }> = [
+        { pool: top, n: need[r].top, target: t.top },
+        { pool: sec, n: need[r].sec, target: t.sec },
+        { pool: rot, n: need[r].rot, target: t.rot },
+      ];
+      for (const step of plan) {
+        for (let i = 0; i < step.n; i++) {
+          const rem = (TARGET[r] - team.filter((x) => x.role === r).length - 1);
+          const pick =
+            pickUnderCap(r, step.pool, step.target * (1 + Math.random() * 0.10), rem) ||
+            pickUnderCap(r, byRole[r], step.target, rem);
+          if (pick) addToTeam(pick);
         }
-      };
-      take(top, need[r].top, t.top);
-      take(sec, need[r].sec, t.sec);
-      take(rot, need[r].rot, t.rot);
-
-      // riempi eventuali slot mancanti
-      let i = 0;
-      while (team.filter((x) => x.role === r).length < TARGET[r] && i < byRole[r].length) {
-        const p = byRole[r][i++]; if (!used.has(p.id)) { used.add(p.id); team.push(p); }
+      }
+      // riempi eventuali slot rimanenti rispettando cap
+      while (team.filter((x) => x.role === r).length < TARGET[r]) {
+        const rem = (TARGET[r] - team.filter((x) => x.role === r).length - 1);
+        const pick = pickUnderCap(r, byRole[r], t.sec, rem);
+        if (pick) addToTeam(pick);
+        else break;
       }
     });
 
-    // rifinitura budget globale
+    // ---------- ENFORCEMENT PER RUOLO (cap stretto) ----------
+    const EPS_ROLE = Math.max(2, Math.round(budget * 0.01)); // tolleranza minima
+    (['P', 'D', 'C', 'A'] as ClassicRole[]).forEach((r) => {
+      const roleTeamIdx = team.map((p, i) => ({ p, i })).filter((x) => x.p.role === r);
+      const roleTeam = roleTeamIdx.map((x) => x.p);
+      const roleBudget = budgets[r];
+
+      // se sfora, fai downgrade finché rientra
+      let spentR = roleTeam.reduce((s, p) => s + p.price, 0);
+      let safety = 0;
+      while (spentR > roleBudget + EPS_ROLE && safety < 200) {
+        const victimIdx = roleTeam.reduce((imax, _, i, arr) => (arr[i].price > arr[imax].price ? i : imax), 0);
+        const victim = roleTeam[victimIdx];
+        const pool = byRole[r].filter((p) => !team.some((x) => x.id === p.id) && p.price < victim.price).sort((a, b) => b.price - a.price);
+        const replacement = pool.find((p) => spentR - victim.price + p.price <= roleBudget + EPS_ROLE);
+        if (!replacement) break;
+        // swap
+        const teamIdx = roleTeamIdx[victimIdx].i;
+        team[teamIdx] = replacement;
+        roleTeam[victimIdx] = replacement;
+        spentR = roleTeam.reduce((s, p) => s + p.price, 0);
+        safety++;
+      }
+
+      // se avanza molto, prova upgrade (entro cap ruolo)
+      safety = 0;
+      while (roleBudget - spentR > EPS_ROLE && safety < 200) {
+        // prova migliorare il più economico
+        const cheapIdx = roleTeam.reduce((imin, _, i, arr) => (arr[i].price < arr[imin].price ? i : imin), 0);
+        const base = roleTeam[cheapIdx];
+        const margin = roleBudget - (spentR - base.price);
+        const pool = byRole[r]
+          .filter((p) => !team.some((x) => x.id === p.id) && p.price > base.price && p.price <= margin + 0.01)
+          .sort((a, b) => b.price - a.price);
+        if (!pool.length) break;
+        const best = pool[0];
+        const teamIdx = roleTeamIdx[cheapIdx].i;
+        team[teamIdx] = best;
+        roleTeam[cheapIdx] = best;
+        spentR = roleTeam.reduce((s, p) => s + p.price, 0);
+        safety++;
+      }
+    });
+
+    // ---------- RIFINITURA BUDGET GLOBALE ----------
     const total = (arr: Player[]) => arr.reduce((s, p) => s + p.price, 0);
     let spent = total(team);
+    const EPS_GLOBAL = Math.max(3, Math.round(budget * 0.015));
 
     function tryDowngradeOnce(current: Player[]): Player[] {
       const idxMax = current.reduce((imax, _, i, arr) => (arr[i].price > arr[imax].price ? i : imax), 0);
@@ -295,6 +359,16 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
       if (!pool.length) return current;
       const cheaper = pool[0];
       const next = [...current]; next[idxMax] = cheaper; return next;
+    }
+    function tryUpgradeOnce(current: Player[], room: number): Player[] {
+      const idxMin = current.reduce((imin, _, i, arr) => (arr[i].price < arr[imin].price ? i : imin), 0);
+      const base = current[idxMin];
+      const pool = byRole[base.role]
+        .filter((p) => !current.some((x) => x.id === p.id) && p.price > base.price && p.price - base.price <= room + 0.01)
+        .sort((a, b) => b.price - a.price);
+      if (!pool.length) return current;
+      const better = pool[0];
+      const next = [...current]; next[idxMin] = better; return next;
     }
 
     let guard = 0;
@@ -305,18 +379,12 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
       spent = total(team);
       guard++;
     }
-
     guard = 0;
-    while (budget - spent > Math.max(5, budget * 0.025) && guard < 200) {
-      (['P', 'D', 'C', 'A'] as ClassicRole[]).forEach((r) => {
-        const idxs: number[] = []; const roleTeam: Player[] = [];
-        team.forEach((p, i) => { if (p.role === r) { idxs.push(i); roleTeam.push(p); } });
-        const res = tryUpgrade(roleTeam, byRole[r], budget - spent);
-        if (res.team !== roleTeam) {
-          res.team.forEach((p, k) => { team[idxs[k]] = p; });
-          spent = total(team);
-        }
-      });
+    while (budget - spent > EPS_GLOBAL && guard < 300) {
+      const next = tryUpgradeOnce(team, budget - spent);
+      if (next === team) break;
+      team.splice(0, team.length, ...next);
+      spent = total(team);
       guard++;
     }
 
