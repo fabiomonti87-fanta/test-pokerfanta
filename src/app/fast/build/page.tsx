@@ -1,0 +1,46 @@
+'use client';
+
+import React from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import ClassicBuilder from '@/components/fast/ClassicBuilder';
+
+export default function BuildPage() {
+  const router = useRouter();
+  const sp = useSearchParams();
+  const tableId = sp.get('id') ?? 't0';
+  const stack = Number(sp.get('stack') ?? 1000);
+  const buyIn = Number(sp.get('buyIn') ?? 1);
+  const capacity = Number(sp.get('cap') ?? 20);
+  const kind = sp.get('kind') ?? 'classic';
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 text-white p-4">
+      <div className="max-w-6xl mx-auto space-y-4">
+        <header className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Costruisci squadra</h1>
+            <div className="text-sm text-white/80">
+              Tavolo {tableId} • Modalità {kind} • Buy-in €{buyIn} • Capienza {capacity} • Stack {stack}
+            </div>
+          </div>
+          <button onClick={() => router.push('/fast')} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15">
+            Torna alla lobby
+          </button>
+        </header>
+
+        <section className="bg-white/5 rounded-xl border border-white/10 p-4">
+          <ClassicBuilder
+            budget={stack}
+            onConfirm={(team, left) => {
+              const payload = { tableId, kind, buyIn, capacity, stack, team, left, ts: Date.now() };
+              // Salviamo per la pagina risultato
+              localStorage.setItem('fast:lastRoster', JSON.stringify(payload));
+              const params = new URLSearchParams({ id: tableId, buyIn: String(buyIn), cap: String(capacity), stack: String(stack), kind });
+              router.push(`/fast/result?${params.toString()}`);
+            }}
+          />
+        </section>
+      </div>
+    </div>
+  );
+}
