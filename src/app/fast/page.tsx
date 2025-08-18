@@ -3,7 +3,6 @@
 import React, { useMemo, useState } from 'react';
 import ClassicBuilder from '@/components/fast/ClassicBuilder';
 import { Roboto } from 'next/font/google';
-import { ChevronDown, ChevronUp } from 'lucide-react';
 
 const roboto = Roboto({ subsets: ['latin'], weight: ['300','400','500','700'] });
 
@@ -19,15 +18,31 @@ type Table = {
   stack: number;     // budget (1000 o 200)
 };
 
-function simulateClassicScore() {
-  // segnaposto (soft colors a valle)
-  return 60 + Math.round(Math.random() * 50);
+type Participant = { name: string; score: number; prize: number };
+
+function payoutsForCapacity(cap: number): number[] {
+  // percentuali che sommano ~100
+  if (cap <= 2) return [100];
+  if (cap <= 4) return [70, 30];
+  if (cap <= 6) return [50, 30, 20];
+  if (cap <= 10) return [50, 30, 20];
+  if (cap <= 20) return [40, 25, 15, 12, 8];
+  // cap ~50
+  return [22, 16, 13, 10, 8, 7, 6, 6, 6, 6];
+}
+
+function simulateClassicScore(spentRatio: number) {
+  // base 60–110 con leggera spinta se hai speso quasi tutto
+  const base = 60 + Math.random() * 50;
+  const bump = 8 * spentRatio; // max +8
+  return Math.round(base + bump);
 }
 
 export default function FastPage() {
   const [view, setView] = useState<'lobby'|'builder'|'result'>('lobby');
   const [currentTable, setCurrentTable] = useState<Table | null>(null);
-  const [resultScore, setResultScore] = useState<number | null>(null);
+  const [leaderboard, setLeaderboard] = useState<Participant[] | null>(null);
+  const [resultInfo, setResultInfo] = useState<{ pot: number; rake: number; pool: number } | null>(null);
 
   // DEMO: tavoli base
   const [tables, setTables] = useState<Table[]>([
@@ -40,7 +55,7 @@ export default function FastPage() {
   ]);
 
   // Filtri lobby
-  const [showCompleted, setShowCompleted] = useState(false); // default OFF (richiesta 2)
+  const [showCompleted, setShowCompleted] = useState(false); // default OFF
   const [buyInRange, setBuyInRange] = useState<[number, number]>([1, 50]);
   const [capRange, setCapRange] = useState<[number, number]>([2, 20]);
 
@@ -53,7 +68,7 @@ export default function FastPage() {
     }).sort((a,b) => a.buyIn - b.buyIn || a.capacity - b.capacity);
   }, [tables, showCompleted, buyInRange, capRange]);
 
-  // “Crea tavolo” collapsible (richiesta 1)
+  // “Crea tavolo” collapsible
   const [showCreate, setShowCreate] = useState(false);
   const [newBuyIn, setNewBuyIn] = useState(5);
   const [newCap, setNewCap] = useState(10);
@@ -71,6 +86,47 @@ export default function FastPage() {
     setView('builder');
   }
 
+  function runResult(table: Table, teamSpent: number) {
+    const youName = 'Tu';
+    // riempi il tavolo con bot
+    const totalPlayers = table.capacity;
+    const enroll = Math.max(table.enrolled, totalPlayers - 1); // garantisco che si riempia in demo
+    const participants: Participant[] = [];
+    const spentRatio = teamSpent / table.stack;
+
+    // il tuo risultato
+    const yourScore = simulateClassicScore(spentRatio);
+    participants.push({ name: youName, score: yourScore, prize: 0 });
+
+    // bot
+    for (let i = 1; i < totalPlayers; i++) {
+      const botSpentRatio = 0.75 + Math.random() * 0.25; // bot decenti
+      const sc = simulateClassicScore(botSpentRatio);
+      participants.push({ name: `Bot ${i}`, score: sc, prize: 0 });
+    }
+
+    // classifica
+    participants.sort((a, b) => b.score - a.score);
+
+    // montepremi
+    const entrants = totalPlayers; // demo: tavolo pieno
+    const pot = entrants * table.buyIn;
+    const rake = Math.round(pot * 0.10 * 100) / 100;
+    const pool = pot - rake;
+
+    // payout
+    const pct = payoutsForCapacity(table.capacity);
+    const winners = Math.min(pct.length, participants.length);
+    for (let i = 0; i < winners; i++) {
+      const share = Math.round((pool * (pct[i] / 100)) * 100) / 100;
+      participants[i].prize = share;
+    }
+
+    setLeaderboard(participants);
+    setResultInfo({ pot, rake, pool });
+    setView('result');
+  }
+
   return (
     <main className={`${roboto.className} min-h-screen bg-gradient-to-br from-[#0b1222] via-[#0f1b33] to-[#0b1222] text-white p-4`}>
       {view === 'lobby' && (
@@ -85,7 +141,7 @@ export default function FastPage() {
             </button>
           </div>
 
-          {/* Pannello Crea tavolo (collassabile) */}
+          {/* Pannello Crea tavolo */}
           {showCreate && (
             <div className="rounded-xl border border-emerald-400/30 bg-white/5 p-4">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -126,7 +182,7 @@ export default function FastPage() {
                   <button onClick={createTable} className="w-full px-3 py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-700">Crea</button>
                 </div>
               </div>
-              <p className="text-xs text-white/60 mt-2">Nota: nella demo la rake non viene applicata realmente, è solo un placeholder.</p>
+              <p className="text-xs text-white/60 mt-2">Nota: nella demo la rake è fissa al 10%.</p>
             </div>
           )}
 
@@ -193,22 +249,55 @@ export default function FastPage() {
           <button onClick={()=> setView('lobby')} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15">← Torna alla lobby</button>
           <ClassicBuilder
             budget={currentTable.stack}
-            onConfirm={(team) => {
-              const score = simulateClassicScore();
-              setResultScore(score);
-              setView('result');
+            onConfirm={(_team, budgetLeft) => {
+              const spent = currentTable.stack - budgetLeft;
+              runResult(currentTable, spent);
             }}
           />
         </div>
       )}
 
-      {view === 'result' && (
-        <div className="max-w-3xl mx-auto mt-6">
+      {view === 'result' && leaderboard && resultInfo && currentTable && (
+        <div className="max-w-4xl mx-auto mt-6">
           <div className="rounded-2xl border border-white/10 bg-[#0f1b33]/80 p-6 shadow-lg">
-            <h2 className="text-xl font-semibold mb-2">Simulazione completata</h2>
-            <p className="text-white/80 mb-4">Punteggio squadra (demo):</p>
-            <div className="text-5xl font-bold text-emerald-300">{resultScore}</div>
-            <p className="text-sm text-white/60 mt-3">Colori ridotti per massima leggibilità. Nella demo il calcolo è fittizio.</p>
+            <h2 className="text-xl font-semibold mb-2">Risultati tavolo</h2>
+            <div className="text-sm text-white/70 mb-4">
+              Buy-in <span className="font-semibold text-white">{currentTable.buyIn}€</span> • Capienza {currentTable.capacity} • Stack {currentTable.stack}
+            </div>
+
+            {/* Payout info */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+              <Info label="Montepremi lordo" value={`${resultInfo.pot.toFixed(2)}€`} />
+              <Info label="Rake (10%)" value={`-${resultInfo.rake.toFixed(2)}€`} />
+              <Info label="Montepremi netto" value={`${resultInfo.pool.toFixed(2)}€`} accent />
+            </div>
+
+            {/* Classifica */}
+            <div className="overflow-x-auto rounded-lg border border-white/10">
+              <table className="w-full text-sm">
+                <thead className="bg-white/5">
+                  <tr>
+                    <th className="text-left px-3 py-2">#</th>
+                    <th className="text-left px-3 py-2">Giocatore</th>
+                    <th className="text-right px-3 py-2">Punteggio</th>
+                    <th className="text-right px-3 py-2">Premio</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/10">
+                  {leaderboard.map((p, i) => (
+                    <tr key={i} className="hover:bg-white/5">
+                      <td className="px-3 py-2">{i+1}</td>
+                      <td className="px-3 py-2">{p.name}</td>
+                      <td className="px-3 py-2 text-right">{p.score}</td>
+                      <td className={`px-3 py-2 text-right ${p.prize>0?'text-emerald-300 font-semibold':'text-white/60'}`}>
+                        {p.prize>0 ? `${p.prize.toFixed(2)}€` : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
             <div className="mt-6 flex gap-2">
               <button onClick={()=> setView('lobby')} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15">Torna ai tavoli</button>
             </div>
@@ -216,5 +305,14 @@ export default function FastPage() {
         </div>
       )}
     </main>
+  );
+}
+
+function Info({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className={`rounded-lg px-3 py-3 border border-white/10 ${accent ? 'bg-emerald-700/30' : 'bg-white/5'}`}>
+      <div className="text-xs text-white/70">{label}</div>
+      <div className={`text-lg ${accent ? 'text-emerald-200 font-semibold' : 'text-white'}`}>{value}</div>
+    </div>
   );
 }
