@@ -113,20 +113,112 @@ export default function ClassicBuilder({
   }, [players, selected, q, roleFilter, teamFilter]);
 
   // -------------------- Excel (colonna L = FVM) --------------------
-  function parseExcelToPlayers(data: ArrayBuffer) {
-    const wb = XLSX.read(data, { type: 'array' });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<any>(ws, { header: 1 }) as any[][];
+ // utils locali (se non le hai già nello stesso file)
+const roleMapToClassic = (r: string): ClassicRole | null => {
+  const R = r.toUpperCase();
+  if (['P','POR','PORTIERE'].includes(R)) return 'P';
+  if (['D','DC','DD','DS','E','B','DEF'].includes(R)) return 'D';
+  if (['C','M','T','MED','MID'].includes(R)) return 'C';
+  if (['A','W','PC','ATT','FWD'].includes(R)) return 'A';
+  return null;
+};
+const toNumber = (v: any) => {
+  if (typeof v === 'number') return v;
+  const s = String(v ?? '').replace(',', '.').replace(/\s/g, '');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+};
 
-    if (!rows.length) return;
+function parseExcelToPlayers(data: ArrayBuffer) {
+  const wb = XLSX.read(data, { type: 'array' });
 
-    const header = rows[0].map((h) => String(h || '').trim());
-    const findIdx = (labels: string[], fallback?: number) => {
-      const i = header.findIndex((h) =>
-        labels.some((l) => h.toLowerCase() === l.toLowerCase()),
-      );
-      return i >= 0 ? i : fallback ?? -1;
+  // prova prima "Tutti" / "Quot" / "List"
+  const orderedSheets = [
+    ...wb.SheetNames.filter((n) => /tutti|quot|list/i.test(n)),
+    ...wb.SheetNames,
+  ];
+
+  for (const sn of orderedSheets) {
+    const ws = wb.Sheets[sn];
+    if (!ws) continue;
+
+    const rows: any[][] = XLSX.utils.sheet_to_json(ws, {
+      header: 1,
+      raw: true,
+      blankrows: false,
+    }) as any[][];
+
+    if (!rows.length) continue;
+
+    // trova riga header (entro le prime 40)
+    let hi = -1;
+    for (let i = 0; i < Math.min(40, rows.length); i++) {
+      const r = rows[i]?.map((x) => String(x ?? '').trim().toLowerCase()) ?? [];
+      const hasNome = r.includes('nome') || r.includes('giocatore') || r.includes('calciatore');
+      const hasSquadra = r.includes('squadra') || r.includes('team') || r.includes('club');
+      const hasR = r.includes('r') || r.includes('ruolo');
+      const hasFvm = r.includes('fvm') || r.includes('fvm m') || r.includes('quotazione fvm');
+      if (hasNome && hasSquadra && (hasR || r.includes('rm')) && (hasFvm || true)) { hi = i; break; }
+    }
+    if (hi < 0) continue;
+
+    const header = rows[hi].map((h) => String(h ?? '').trim());
+    const H = header.map((h) => h.toLowerCase());
+
+    const idx = (cands: string[], fb?: number) => {
+      const i = H.findIndex((h) => cands.includes(h));
+      return i >= 0 ? i : (fb ?? -1);
     };
+
+    const idxR  = idx(['r','ruolo']);
+    const idxRM = idx(['rm','ruolo mantra','mantra']);
+    const idxNome = idx(['nome','giocatore','calciatore']);
+    const idxTeam = idx(['squadra','team','club']);
+    let idxFVM = idx(['fvm','fvm m','quotazione fvm']);
+    if (idxFVM < 0) idxFVM = 11; // fallback: colonna L
+
+    const out: Player[] = [];
+    for (let i = hi + 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r) continue;
+
+      const name = String(r[idxNome] ?? '').trim();
+      const team = String(r[idxTeam] ?? '').trim();
+      const roleRaw = String((idxR >= 0 ? r[idxR] : r[idxRM]) ?? '').trim();
+      let role: ClassicRole | null =
+        (idxR >= 0 && ['P','D','C','A'].includes(roleRaw.toUpperCase()))
+          ? (roleRaw.toUpperCase() as ClassicRole)
+          : roleMapToClassic(roleRaw);
+      const price = toNumber(r[idxFVM]);
+
+      if (!name || !team || !role || !Number.isFinite(price) || price <= 0) continue;
+
+      out.push({
+        id: `${role}-${name}-${team}`.replace(/\s+/g, '_'),
+        name,
+        team,
+        role,
+        price: Math.round(price),
+      });
+    }
+
+    if (out.length) {
+      // ordina per prezzo desc per UX migliore
+      out.sort((a, b) => b.price - a.price);
+      setPlayers(out);
+      setSelected([]);
+      setQ('');
+      setRoleFilter('all');
+      setTeamFilter('all');
+      return;
+    }
+  }
+
+  alert(
+    'Impossibile leggere il listone.\n' +
+    'Controlla che il file abbia le colonne: R/RM, Nome, Squadra e FVM (o FVM in colonna L).'
+  );
+}
 
     const idxRole =
       findIdx(['Ruolo', 'R', 'Role']) >= 0
@@ -176,21 +268,21 @@ export default function ClassicBuilder({
     setSelected([]);
   }
 
-  function handleExcel(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        parseExcelToPlayers(ev.target?.result as ArrayBuffer);
-      } catch {
-        alert('File Excel non valido. Assicurati che la colonna FVM sia presente (colonna L).');
-      }
-    };
-    reader.readAsArrayBuffer(file);
-    // reset input
-    e.currentTarget.value = '';
-  }
+function handleExcel(e: React.ChangeEvent<HTMLInputElement>) {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      parseExcelToPlayers(ev.target?.result as ArrayBuffer);
+    } catch (err) {
+      console.error(err);
+      alert('Errore durante la lettura del file. Assicurati che sia un .xlsx valido.');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+  e.currentTarget.value = '';
+}
 
   // -------------------- Add/Remove --------------------
   function canAdd(p: Player) {
