@@ -43,31 +43,6 @@ function MiniSelect({
 
   const current = options.find((o) => o.value === value)?.label ?? 'Seleziona';
 
-// ...dentro ClassicBuilder(...)
-const [showDebug, setShowDebug] = useState(true); // puoi metterlo false se non vuoi mostrarlo di default
-
-// calcolo budget target per ruolo in base alle percentuali correnti
-const roleBudgetTarget = useMemo(() => {
-  const total = budget;
-  const p = Math.round(total * (dist.P / 100));
-  const d = Math.round(total * (dist.D / 100));
-  const c = Math.round(total * (dist.C / 100));
-  const a = total - (p + d + c); // chiusura su A
-  return { P: p, D: d, C: c, A: a } as Record<ClassicRole, number>;
-}, [budget, dist]);
-
-// spesa live per ruolo nella rosa selezionata
-const roleSpentLive = useMemo(() => {
-  return selected.reduce(
-    (acc, cur) => {
-      acc[cur.role] += cur.price;
-      return acc;
-    },
-    { P: 0, D: 0, C: 0, A: 0 } as Record<ClassicRole, number>
-  );
-}, [selected]);
-
-  
   return (
     <div ref={ref} className={`relative ${className}`}>
       <button
@@ -120,6 +95,26 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
   // Distribuzione — VINCOLA davvero il randomizzatore
   const [dist, setDist] = useState<Dist>({ P: 9, D: 15, C: 30, A: 46 });
 
+  // 🔧 DEBUG BADGE: stato + calcoli
+  const [showDebug, setShowDebug] = useState<boolean>(true);
+  const roleBudgetTarget = useMemo(() => {
+    const total = budget;
+    const p = Math.round(total * (dist.P / 100));
+    const d = Math.round(total * (dist.D / 100));
+    const c = Math.round(total * (dist.C / 100));
+    const a = total - (p + d + c); // chiusura su A
+    return { P: p, D: d, C: c, A: a } as Record<ClassicRole, number>;
+  }, [budget, dist]);
+  const roleSpentLive = useMemo(() => {
+    return selected.reduce(
+      (acc, cur) => {
+        acc[cur.role] += cur.price;
+        return acc;
+      },
+      { P: 0, D: 0, C: 0, A: 0 } as Record<ClassicRole, number>
+    );
+  }, [selected]);
+
   const budgetUsed = useMemo(() => selected.reduce((s, p) => s + p.price, 0), [selected]);
   const budgetLeft = budget - budgetUsed;
   const counts = useMemo(
@@ -154,7 +149,7 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
     try {
       setUploadMsg('Caricamento…');
       const buf = await file.arrayBuffer();
-      const parsed = parsePlayersFromXLSX(buf); // legge FVM (colonna L)
+      const parsed = parsePlayersFromXLSX(buf); // deve leggere FVM (col. L)
       if (!parsed.length) {
         setPlayers([]);
         setUploadMsg('⚠️ Nessun giocatore riconosciuto. Attese colonne: Nome / Squadra / Ruolo / FVM (col. L).');
@@ -285,7 +280,7 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
       if (triple) {
         const sorted = [...triple].sort((a, b) => b.price - a.price);
         for (let i = 0; i < 3; i++) {
-          const rem = (3 - (i + 1));
+          const rem = 3 - (i + 1);
           const capPick = pickUnderCap('P', sorted, i === 0 ? t.top : t.sec, rem);
           if (capPick) addToTeam(capPick);
         }
@@ -312,24 +307,24 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
       ];
       for (const step of plan) {
         for (let i = 0; i < step.n; i++) {
-          const rem = (TARGET[r] - team.filter((x) => x.role === r).length - 1);
+          const rem = TARGET[r] - team.filter((x) => x.role === r).length - 1;
           const pick =
-            pickUnderCap(r, step.pool, step.target * (1 + Math.random() * 0.10), rem) ||
+            pickUnderCap(r, step.pool, step.target * (1 + Math.random() * 0.1), rem) ||
             pickUnderCap(r, byRole[r], step.target, rem);
           if (pick) addToTeam(pick);
         }
       }
       // riempi eventuali slot rimanenti rispettando cap
       while (team.filter((x) => x.role === r).length < TARGET[r]) {
-        const rem = (TARGET[r] - team.filter((x) => x.role === r).length - 1);
+        const rem = TARGET[r] - team.filter((x) => x.role === r).length - 1;
         const pick = pickUnderCap(r, byRole[r], t.sec, rem);
         if (pick) addToTeam(pick);
         else break;
       }
     });
 
-    // ---------- ENFORCEMENT PER RUOLO (cap stretto) ----------
-    const EPS_ROLE = Math.max(2, Math.round(budget * 0.01)); // tolleranza minima
+    // ---------- ENFORCEMENT PER RUOLO ----------
+    const EPS_ROLE = Math.max(2, Math.round(budget * 0.01));
     (['P', 'D', 'C', 'A'] as ClassicRole[]).forEach((r) => {
       const roleTeamIdx = team.map((p, i) => ({ p, i })).filter((x) => x.p.role === r);
       const roleTeam = roleTeamIdx.map((x) => x.p);
@@ -355,7 +350,6 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
       // se avanza molto, prova upgrade (entro cap ruolo)
       safety = 0;
       while (roleBudget - spentR > EPS_ROLE && safety < 200) {
-        // prova migliorare il più economico
         const cheapIdx = roleTeam.reduce((imin, _, i, arr) => (arr[i].price < arr[imin].price ? i : imin), 0);
         const base = roleTeam[cheapIdx];
         const margin = roleBudget - (spentR - base.price);
@@ -475,35 +469,35 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
           </button>
           <input type="file" ref={fileRef} accept=".xlsx,.xls" className="hidden" onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])} />
           {uploadMsg && <div className="text-xs text-emerald-200/90 bg-emerald-900/30 border border-emerald-500/30 rounded-md px-2 py-1">{uploadMsg}</div>}
+
           {/* Toggle debug */}
-<button
-  type="button"
-  onClick={() => setShowDebug(v => !v)}
-  className="px-2 py-1 rounded-md bg-white/10 text-white hover:bg-white/15 text-xs"
-  title="Mostra/Nascondi debug budget per ruolo"
->
-  {showDebug ? 'Nascondi debug' : 'Mostra debug'}
-</button>
+          <button
+            type="button"
+            onClick={() => setShowDebug((v) => !v)}
+            className="px-2 py-1 rounded-md bg-white/10 text-white hover:bg-white/15 text-xs"
+            title="Mostra/Nascondi debug budget per ruolo"
+          >
+            {showDebug ? 'Nascondi debug' : 'Mostra debug'}
+          </button>
 
-{/* Badge debug budget/ruolo */}
-{showDebug && (
-  <div className="ml-2 inline-flex items-center gap-2 rounded-lg px-2 py-1 border border-emerald-400/30 bg-emerald-900/30 text-emerald-100 text-xs">
-    {(['P','D','C','A'] as ClassicRole[]).map(r => {
-      const spent = roleSpentLive[r];
-      const cap = roleBudgetTarget[r];
-      const over = spent > cap;
-      return (
-        <span key={r} className="inline-flex items-center gap-1">
-          <span className="px-1 py-0.5 rounded bg-white/10 text-white">{r}</span>
-          <span className={over ? 'text-rose-300 font-semibold' : 'text-emerald-200'}>
-            {spent}/{cap}
-          </span>
-        </span>
-      );
-    })}
-  </div>
-)}
-
+          {/* Badge debug budget/ruolo */}
+          {showDebug && (
+            <div className="inline-flex items-center gap-2 rounded-lg px-2 py-1 border border-emerald-400/30 bg-emerald-900/30 text-emerald-100 text-xs">
+              {(['P', 'D', 'C', 'A'] as ClassicRole[]).map((r) => {
+                const spent = roleSpentLive[r];
+                const cap = roleBudgetTarget[r];
+                const over = spent > cap;
+                return (
+                  <span key={r} className="inline-flex items-center gap-1">
+                    <span className="px-1 py-0.5 rounded bg-white/10 text-white">{r}</span>
+                    <span className={over ? 'text-rose-300 font-semibold' : 'text-emerald-200'}>
+                      {spent}/{cap}
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 
@@ -542,7 +536,7 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
           </p>
           <div className="flex items-center gap-2">
             <button onClick={randomizeSmart} className="inline-flex items-center gap-2 self-start px-3 py-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-700 text-white">
-              <Wand2 size={16} /> Randomizza (smart)
+              <Wand2 size={16} /> Randomizza (rispetta % ruolo)
             </button>
             <button onClick={() => setSelected([])} className="px-3 py-2 rounded-lg bg-white/10 text-white hover:bg-white/20">
               Svuota rosa
@@ -616,7 +610,9 @@ export default function ClassicBuilder({ budget, initialPlayers = [], onConfirm 
             {selected.map((s) => (
               <div key={s.id} className="flex items-center justify-between bg-white/10 rounded-lg px-3 py-2">
                 <div>
-                  <div className="text-white">{s.role} • {s.name}</div>
+                  <div className="text-white">
+                    {s.role} • {s.name}
+                  </div>
                   <div className="text-xs text-white/70">{s.team}</div>
                 </div>
                 <div className="flex items-center gap-2">
