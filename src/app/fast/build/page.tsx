@@ -1,12 +1,15 @@
 'use client';
 
-import React from 'react';
+import React, { Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ClassicBuilder from '@/components/fast/ClassicBuilder';
 
-export default function BuildPage() {
+export const dynamic = 'force-dynamic';
+
+function BuildContent() {
   const router = useRouter();
   const sp = useSearchParams();
+
   const tableId = sp.get('id') ?? 't0';
   const stack = Number(sp.get('stack') ?? 1000);
   const buyIn = Number(sp.get('buyIn') ?? 1);
@@ -33,14 +36,35 @@ export default function BuildPage() {
             budget={stack}
             onConfirm={(team, left) => {
               const payload = { tableId, kind, buyIn, capacity, stack, team, left, ts: Date.now() };
-              // Salviamo per la pagina risultato
-              localStorage.setItem('fast:lastRoster', JSON.stringify(payload));
-              const params = new URLSearchParams({ id: tableId, buyIn: String(buyIn), cap: String(capacity), stack: String(stack), kind });
+              try {
+                localStorage.setItem('fast:lastRoster', JSON.stringify(payload));
+              } catch {}
+              const params = new URLSearchParams({
+                id: tableId,
+                buyIn: String(buyIn),
+                cap: String(capacity),
+                stack: String(stack),
+                kind,
+              });
               router.push(`/fast/result?${params.toString()}`);
             }}
           />
         </section>
       </div>
     </div>
+  );
+}
+
+export default function BuildPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen grid place-items-center bg-slate-900 text-white">
+          Caricamento…
+        </div>
+      }
+    >
+      <BuildContent />
+    </Suspense>
   );
 }
