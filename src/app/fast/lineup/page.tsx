@@ -2,246 +2,223 @@
 
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import type { Player, FormationKey } from '@/components/fast/ClassicBuilder';
+import type { Player, ClassicRole } from '@/components/fast/ClassicBuilder';
 
 export const dynamic = 'force-dynamic';
 
-type Slot = { id: string; x: number; y: number; role: 'P'|'D'|'C'|'A'; assigned?: Player };
+type FormationKey = '3-4-3'|'4-3-3'|'3-5-2'|'4-4-2'|'4-5-1'|'5-3-2'|'5-4-1';
 
-function makeSlots(formation: FormationKey): Slot[] {
-  const { D, C, A } = parseFormation(formation);
-  const slots: Slot[] = [];
+const FORM_SHAPE: Record<FormationKey, { D:number; C:number; A:number }> = {
+  '3-4-3': { D:3, C:4, A:3 },
+  '4-3-3': { D:4, C:3, A:3 },
+  '3-5-2': { D:3, C:5, A:2 },
+  '4-4-2': { D:4, C:4, A:2 },
+  '4-5-1': { D:4, C:5, A:1 },
+  '5-3-2': { D:5, C:3, A:2 },
+  '5-4-1': { D:5, C:4, A:1 },
+};
 
-  // GK in basso
-  slots.push({ id: 'P1', role: 'P', x: 50, y: 90 });
-
-  const spread = (n: number) => Array.from({length:n}, (_,i)=> (100/(n+1))*(i+1));
-
-  // linee difesa-centrocampo-attacco (dal basso verso l’alto)
-  spread(D).forEach((x,i)=> slots.push({ id: `D${i+1}`, role:'D', x, y: 70 }));
-  spread(C).forEach((x,i)=> slots.push({ id: `C${i+1}`, role:'C', x, y: 50 }));
-  spread(A).forEach((x,i)=> slots.push({ id: `A${i+1}`, role:'A', x, y: 30 }));
-
-  return slots;
-}
-
-function parseFormation(key: FormationKey) {
-  const [d,c,a] = key.split('-').map(n => Number(n));
-  return { D: d, C: c, A: a };
+function useSavedRoster() {
+  const [saved, setSaved] = useState<any>(null);
+  useEffect(() => {
+    try { const raw = localStorage.getItem('fast:lastRoster'); if (raw) setSaved(JSON.parse(raw)); } catch {}
+  }, []);
+  return saved as (null | {
+    tableId: string; kind: string; buyIn: number; capacity: number; stack: number;
+    team: Player[]; left: number; formation: FormationKey; ts: number;
+  });
 }
 
 function LineupContent() {
   const router = useRouter();
   const sp = useSearchParams();
-
   const tableId = sp.get('id') ?? 't0';
   const buyIn = Number(sp.get('buyIn') ?? 1);
   const capacity = Number(sp.get('cap') ?? 20);
   const stack = Number(sp.get('stack') ?? 1000);
   const kind = sp.get('kind') ?? 'classic';
 
-  const [roster, setRoster] = useState<{ team: Player[]; formation: FormationKey } | null>(null);
+  const saved = useSavedRoster();
+  const formation: FormationKey = saved?.formation ?? '3-4-3';
+  const shape = FORM_SHAPE[formation];
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('fast:lastRoster');
-      if (raw) {
-        const j = JSON.parse(raw);
-        setRoster({ team: j.team as Player[], formation: j.formation as FormationKey });
-      }
-    } catch {}
-  }, []);
+  // stato XI: 1P + D,C,A secondo modulo; memorizzo id giocatore per slot
+  const [gk, setGk] = useState<string>('');
+  const [dIds, setDIds] = useState<string[]>(Array(shape.D).fill(''));
+  const [cIds, setCIds] = useState<string[]>(Array(shape.C).fill(''));
+  const [aIds, setAIds] = useState<string[]>(Array(shape.A).fill(''));
 
-  const [formation, setFormation] = useState<FormationKey>('3-4-3');
-  const [activeRole, setActiveRole] = useState<'P'|'D'|'C'|'A'>('A');
+  const used = useMemo(()=> new Set([gk, ...dIds, ...cIds, ...aIds].filter(Boolean)), [gk, dIds, cIds, aIds]);
 
-  useEffect(() => {
-    if (roster?.formation) setFormation(roster.formation);
-  }, [roster?.formation]);
-
-  const slots = useMemo(() => makeSlots(formation), [formation]);
-
-  const [assignments, setAssignments] = useState<Record<string, Player|undefined>>({});
-
-  const assignedIds = useMemo(() => new Set(Object.values(assignments).filter(Boolean).map(p => (p as Player).id)), [assignments]);
-  const remaining = useMemo(() => (roster?.team ?? []).filter(p => !assignedIds.has(p.id)), [roster?.team, assignedIds]);
-
-  const needCount = useMemo(() => {
+  const byRole = useMemo(() => {
+    const pool = saved?.team ?? [];
     return {
-      P: slots.filter(s=>s.role==='P').length - (Object.values(assignments).filter(p=>p && (p as Player).role==='P').length),
-      D: slots.filter(s=>s.role==='D').length - (Object.values(assignments).filter(p=>p && (p as Player).role==='D').length),
-      C: slots.filter(s=>s.role==='C').length - (Object.values(assignments).filter(p=>p && (p as Player).role==='C').length),
-      A: slots.filter(s=>s.role==='A').length - (Object.values(assignments).filter(p=>p && (p as Player).role==='A').length),
-    };
-  }, [slots, assignments]);
+      P: pool.filter(p => p.role === 'P'),
+      D: pool.filter(p => p.role === 'D'),
+      C: pool.filter(p => p.role === 'C'),
+      A: pool.filter(p => p.role === 'A'),
+    } as Record<ClassicRole, Player[]>;
+  }, [saved]);
 
-  const bench = useMemo(() => remaining, [remaining]);
+  const bench = useMemo(() => {
+    if (!saved?.team) return [];
+    return saved.team.filter(p => !used.has(p.id));
+  }, [saved, used]);
 
-  const allAssigned = useMemo(() => {
-    return slots.every(s => assignments[s.id]);
-  }, [slots, assignments]);
-
-  function putInSlot(slotId: string, p: Player) {
-    const slot = slots.find(s => s.id === slotId)!;
-    if (slot.role !== p.role) return;
-    if (assignedIds.has(p.id)) return;
-    setAssignments(prev => ({ ...prev, [slotId]: p }));
-  }
-
-  function clearSlot(slotId: string) {
-    setAssignments(prev => {
-      const n = { ...prev };
-      delete n[slotId];
-      return n;
-    });
-  }
-
-  function confirmLineup() {
-    const xi: Player[] = slots.map(s => assignments[s.id]!).filter(Boolean) as Player[];
+  function commitLineup() {
     const payload = {
-      tableId, buyIn, capacity, stack, kind,
+      tableId, kind, buyIn, capacity, stack,
       formation,
-      xi,
-      bench,
+      XI: {
+        P: gk ? [gk] : [],
+        D: dIds.filter(Boolean),
+        C: cIds.filter(Boolean),
+        A: aIds.filter(Boolean),
+      },
+      bench: bench.map(b => b.id),
       ts: Date.now(),
     };
     try { localStorage.setItem('fast:lastLineup', JSON.stringify(payload)); } catch {}
+    // resta su questa pagina; il bottone "Simula partita" porta ai risultati
   }
+
+  function goSimulate() {
+    const params = new URLSearchParams({ id: tableId, buyIn: String(buyIn), cap: String(capacity), stack: String(stack), kind });
+    router.push(`/fast/result?${params.toString()}`);
+  }
+
+  if (!saved?.team?.length) {
+    return (
+      <div className="min-h-screen grid place-items-center bg-slate-900 text-white">
+        Nessuna rosa salvata. Torna al builder.
+      </div>
+    );
+  }
+
+  // helper option renderer
+  const Opt = ({p}:{p:Player}) => <option value={p.id}>{p.name} — {p.team}</option>;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 text-white p-4">
       <div className="max-w-6xl mx-auto space-y-4">
         <header className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Formazione titolari</h1>
+            <h1 className="text-2xl font-bold">Schiera formazione</h1>
             <div className="text-sm text-white/80">
-              Tavolo {tableId} • Modalità {kind} • Buy-in €{buyIn} • Capienza {capacity} • Stack {stack}
+              Tavolo {tableId} • Modulo {formation} • Buy-in €{buyIn} • Capienza {capacity} • Stack {stack}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <select
-              value={formation}
-              onChange={e => setFormation(e.target.value as FormationKey)}
-              className="px-3 py-2 rounded-lg bg-white/10 text-white border border-white/20"
-              title="Cambia modulo"
-            >
-              {['3-4-3','4-3-3','3-5-2','4-4-2','4-5-1','5-3-2','5-4-1'].map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
-            <button onClick={()=>router.push('/fast/build?'+new URLSearchParams({id:tableId, buyIn:String(buyIn), cap:String(capacity), stack:String(stack), kind}))}
-              className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15">Modifica rosa</button>
+            <button onClick={()=>router.push('/fast/build?'+sp.toString())} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15">
+              Torna alla rosa
+            </button>
           </div>
         </header>
 
-        {/* Campo stilizzato */}
-        <section className="rounded-xl border border-white/10 p-4 bg-[radial-gradient(ellipse_at_center,_rgba(16,185,129,0.12),_rgba(2,6,23,0.2))]">
-          <div className="relative w-full" style={{ paddingTop: '56%' }}>
-            {/* bordo campo */}
-            <div className="absolute inset-2 rounded-xl border-2 border-white/30" />
-            <div className="absolute left-1/2 top-2 bottom-2 w-px bg-white/20 -translate-x-1/2" />
-            {/* area rigore top/bottom */}
-            <div className="absolute left-[20%] top-2 w-[60%] h-[20%] border-b-2 border-white/20" />
-            <div className="absolute left-[20%] bottom-2 w-[60%] h-[20%] border-t-2 border-white/20" />
+        <section className="bg-white/5 rounded-xl border border-white/10 p-4">
+          {/* Campo stilizzato semplice */}
+          <div className="relative w-full rounded-xl border border-white/15 overflow-hidden" style={{paddingTop:'60%', backgroundImage:'repeating-linear-gradient(90deg, rgba(16,122,57,0.9) 0, rgba(16,122,57,0.9) 6%, rgba(13,102,48,0.9) 6%, rgba(13,102,48,0.9) 12%)'}}>
+            <div className="absolute inset-0">
+              {/* linee */}
+              <div className="absolute left-1/2 top-0 -translate-x-1/2 w-px h-full bg-white/40" />
+              <div className="absolute left-[20%] top-0 w-[60%] h-[22%] border-b border-white/40" />
+              <div className="absolute left-[20%] bottom-0 w-[60%] h-[22%] border-t border-white/40" />
+            </div>
 
-            {/* Slots */}
-            {slots.map(s => {
-              const p = assignments[s.id];
-              return (
-                <div
-                  key={s.id}
-                  className="absolute -translate-x-1/2 -translate-y-1/2"
-                  style={{ left: `${s.x}%`, top: `${s.y}%` }}
-                >
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center border ${p ? 'bg-emerald-500 text-slate-900 border-emerald-300' : 'bg-white/10 text-white border-white/30'}`}>
-                    <span className="font-bold">{s.role}</span>
-                  </div>
-                  <div className="mt-1 text-center text-xs">
-                    {p ? p.name : <span className="text-white/60">vuoto</span>}
-                  </div>
-                  {p && (
-                    <div className="text-center mt-1">
-                      <button onClick={()=>clearSlot(s.id)} className="text-[11px] px-2 py-0.5 rounded bg-white/10 hover:bg-white/15">Togli</button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
+            {/* GK */}
+            <div className="absolute left-1/2 top-[88%] -translate-x-1/2 -translate-y-1/2">
+              <Slot
+                label="P"
+                value={gk}
+                onChange={setGk}
+                options={byRole.P.filter(p=>!used.has(p.id) || p.id===gk)}
+              />
+            </div>
 
-        {/* Selettore giocatori per ruolo attivo */}
-        <section className="rounded-xl bg-white/5 border border-white/10 p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-sm">Scegli ruolo: </span>
-            {(['A','C','D','P'] as const).map(r => (
-              <button
-                key={r}
-                onClick={()=>setActiveRole(r)}
-                className={`px-3 py-1.5 rounded-lg border ${activeRole===r ? 'bg-emerald-600 border-emerald-400' : 'bg-white/10 border-white/20 hover:bg-white/15'}`}
-              >
-                {r}
-                {needCount[r] > 0 && <span className="ml-1 text-xs text-white/80">({needCount[r]} da assegnare)</span>}
-              </button>
+            {/* linea D */}
+            {Array.from({length: shape.D}).map((_,i)=>(
+              <div key={`D${i}`} className="absolute" style={{left:`${(100/(shape.D+1))*(i+1)}%`, top:'70%', transform:'translate(-50%, -50%)'}}>
+                <Slot
+                  label="D"
+                  value={dIds[i]}
+                  onChange={(v)=> setDIds(prev=> prev.map((x,idx)=> idx===i? v: x))}
+                  options={byRole.D.filter(p=>!used.has(p.id) || p.id===dIds[i])}
+                />
+              </div>
             ))}
-          </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {(roster?.team ?? [])
-              .filter(p => p.role === activeRole)
-              .filter(p => !assignedIds.has(p.id))
-              .map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => {
-                    // metti nel primo slot libero di quel ruolo
-                    const slot = slots.find(s => s.role === p.role && !assignments[s.id]);
-                    if (slot) putInSlot(slot.id, p);
-                  }}
-                  className="rounded-lg text-left px-3 py-2 bg-white/10 border border-white/20 hover:bg-white/15"
-                >
-                  <div className="text-xs text-white/60">{p.role} • {p.team}</div>
-                  <div className="font-semibold">{p.name}</div>
-                  <div className="text-xs">FVM {p.price}</div>
-                </button>
-              ))}
-          </div>
-        </section>
+            {/* linea C */}
+            {Array.from({length: shape.C}).map((_,i)=>(
+              <div key={`C${i}`} className="absolute" style={{left:`${(100/(shape.C+1))*(i+1)}%`, top:'52%', transform:'translate(-50%, -50%)'}}>
+                <Slot
+                  label="C"
+                  value={cIds[i]}
+                  onChange={(v)=> setCIds(prev=> prev.map((x,idx)=> idx===i? v: x))}
+                  options={byRole.C.filter(p=>!used.has(p.id) || p.id===cIds[i])}
+                />
+              </div>
+            ))}
 
-        {/* Bench + azioni */}
-        <section className="rounded-xl bg-white/5 border border-white/10 p-4">
-          <div className="font-semibold mb-2">Panchina ({bench.length})</div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {bench.map(p => (
-              <div key={p.id} className="rounded-lg px-3 py-2 bg-white/10 border border-white/20">
-                <div className="text-xs text-white/60">{p.role} • {p.team}</div>
-                <div className="font-semibold">{p.name}</div>
-                <div className="text-xs">FVM {p.price}</div>
+            {/* linea A */}
+            {Array.from({length: shape.A}).map((_,i)=>(
+              <div key={`A${i}`} className="absolute" style={{left:`${(100/(shape.A+1))*(i+1)}%`, top:'36%', transform:'translate(-50%, -50%)'}}>
+                <Slot
+                  label="A"
+                  value={aIds[i]}
+                  onChange={(v)=> setAIds(prev=> prev.map((x,idx)=> idx===i? v: x))}
+                  options={byRole.A.filter(p=>!used.has(p.id) || p.id===aIds[i])}
+                />
               </div>
             ))}
           </div>
 
-          <div className="mt-3 flex items-center justify-end gap-2">
-            <button
-              onClick={()=>{
-                setAssignments({});
-              }}
-              className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15"
-            >
-              Reset XI
-            </button>
-            <button
-              onClick={()=>{
-                confirmLineup();
-                const params = new URLSearchParams({ id: tableId, buyIn: String(buyIn), cap: String(capacity), stack: String(stack), kind });
-                router.push(`/fast/result?${params.toString()}`);
-              }}
-              disabled={!allAssigned}
-              className={`px-4 py-2 rounded-lg ${!allAssigned ? 'bg-white/10 text-white/40 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'}`}
-            >
-              Simula partita
-            </button>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button onClick={commitLineup} className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15">Conferma formazione</button>
+            <button onClick={goSimulate} className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700">Simula partita</button>
           </div>
         </section>
+
+        {/* Panchina */}
+        <section className="bg-white/5 rounded-xl border border-white/10 p-4">
+          <h3 className="font-semibold mb-2">Panchina</h3>
+          {bench.length===0 ? (
+            <div className="text-sm text-white/70">Nessun giocatore in panchina.</div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {bench.map(b=>(
+                <div key={b.id} className="rounded-lg bg-white/10 border border-white/10 px-3 py-2">
+                  <div className="font-semibold">{b.role} • {b.name}</div>
+                  <div className="text-xs text-white/70">{b.team}</div>
+                  <div className="text-xs text-white/90">FVM {b.price}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
+    </div>
+  );
+}
+
+function Slot({
+  label, value, onChange, options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v:string)=>void;
+  options: Player[];
+}) {
+  return (
+    <div className="w-40">
+      <div className="text-center text-white/90 text-xs mb-1">{label}</div>
+      <select
+        value={value}
+        onChange={(e)=> onChange(e.target.value)}
+        className="w-full px-2 py-1 rounded-md bg-white/80 text-slate-900"
+      >
+        <option value="">— scegli —</option>
+        {options.map(p=> <option key={p.id} value={p.id}>{p.name} ({p.team})</option>)}
+      </select>
     </div>
   );
 }
